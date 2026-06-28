@@ -1,0 +1,8 @@
+{
+  "name": "Remix: DEM Transport",
+  "description": "Système de réservation interurbaine de transport au Sénégal, connectant passagers et chauffeurs partenaires.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

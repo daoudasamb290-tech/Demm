@@ -1,0 +1,24 @@
+{
+  "name": "DEM niou_dem",
+  "short_name": "DEM",
+  "description": "Réservez votre trajet entre Dakar et les autres régions au Sénégal",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#10204A",
+  "theme_color": "#10204A",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/src/assets/images/log.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/src/assets/images/log.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
