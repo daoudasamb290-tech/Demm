@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { DriverTrip, DriverTransaction, PassengerBooking } from '../types';
 import { INITIAL_DRIVER_TRIPS, INITIAL_TRANSACTIONS, LOCATIONS } from '../data';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { hashPassword, verifyPassword, sanitizeInput, validatePhone } from '../lib/security';
 
 const getTodayISODate = (): string => {
   const d = new Date();
@@ -15,6 +16,47 @@ const getTodayISODate = (): string => {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+const playNotificationSound = () => {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const now = ctx.currentTime;
+    
+    // Tone 1
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(587.33, now); // D5
+    osc1.frequency.exponentialRampToValueAtTime(880, now + 0.15); // A5
+    
+    gain1.gain.setValueAtTime(0.15, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+    
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.4);
+    
+    // Tone 2
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880, now + 0.12); // A5
+    osc2.frequency.exponentialRampToValueAtTime(1174.66, now + 0.25); // D6
+    
+    gain2.gain.setValueAtTime(0.15, now + 0.12);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+    
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.12);
+    osc2.stop(now + 0.5);
+  } catch (err) {
+    console.warn("Failed to play notification sound:", err);
+  }
 };
 
 interface DriverFlowProps {
@@ -33,25 +75,105 @@ export default function DriverFlow({
   onUpdateBookingStatus
 }: DriverFlowProps) {
   // Register form state
-  const [driverAvatar, setDriverAvatar] = useState(() => localStorage.getItem('dem_driver_avatar') || 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA');
-  const [driverName, setDriverName] = useState(() => localStorage.getItem('dem_driver_name') || '');
-  const [driverEmail, setDriverEmail] = useState(() => localStorage.getItem('dem_driver_email') || '');
-  const [driverPhone, setDriverPhone] = useState(() => localStorage.getItem('dem_driver_phone') || '');
-  const [licenseType, setDriverLicense] = useState(() => localStorage.getItem('dem_driver_license') || 'D');
-  const [experienceYears, setExperience] = useState(() => localStorage.getItem('dem_driver_experience') || '8');
-  const [vehicleBrand, setVehicleBrand] = useState(() => localStorage.getItem('dem_driver_vehicle_brand') || '');
-  const [vehiclePlate, setVehiclePlate] = useState(() => localStorage.getItem('dem_driver_vehicle_plate') || '');
-  const [vehicleSeats, setVehicleSeats] = useState(() => localStorage.getItem('dem_driver_vehicle_seats') || '');
-  const [vehicleImage, setVehicleImage] = useState(() => localStorage.getItem('dem_driver_vehicle_image') || 'https://lh3.googleusercontent.com/aida-public/AB6AXuD9TVVPgjd2IX2DGV2fbpVShVAXHyQKmBT0274-gR8kDxcUcUEWkmAM1Lviuz-b7Zr1YB6_neSlzXKjitOvKH66k7xa1X_6GBUhMSQG3Jc5Fsc0QpUEZ49OQeG91yXWM67A5cMHOp47Y90Th0N0A1YfMMf2lLH8PdMYChzMD_ol2JKv1_WTgQOJSL70osXCK9JkiwiJFL4Ijz7XipZWtpedd_1TJexJyyJzB40obG9NVdLUA8dZ4JH4_4KZVjh0vqx248QNuCcEK0HA');
-  const [loginDriverPhone, setLoginDriverPhone] = useState(() => localStorage.getItem('dem_driver_phone') || '');
-  const [loginDriverName, setLoginDriverName] = useState(() => localStorage.getItem('dem_driver_name') || '');
+  const [driverAvatar, setDriverAvatar] = useState('https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA');
+  const [driverName, setDriverName] = useState('');
+  const [driverEmail, setDriverEmail] = useState('');
+  const [driverPhone, setDriverPhone] = useState('');
+  const [licenseType, setDriverLicense] = useState('D');
+  const [experienceYears, setExperience] = useState('8');
+  const [vehicleBrand, setVehicleBrand] = useState('');
+  const [vehiclePlate, setVehiclePlate] = useState('');
+  const [vehicleSeats, setVehicleSeats] = useState('');
+  const [vehicleImage, setVehicleImage] = useState('https://lh3.googleusercontent.com/aida-public/AB6AXuD9TVVPgjd2IX2DGV2fbpVShVAXHyQKmBT0274-gR8kDxcUcUEWkmAM1Lviuz-b7Zr1YB6_neSlzXKjitOvKH66k7xa1X_6GBUhMSQG3Jc5Fsc0QpUEZ49OQeG91yXWM67A5cMHOp47Y90Th0N0A1YfMMf2lLH8PdMYChzMD_ol2JKv1_WTgQOJSL70osXCK9JkiwiJFL4Ijz7XipZWtpedd_1TJexJyyJzB40obG9NVdLUA8dZ4JH4_4KZVjh0vqx248QNuCcEK0HA');
+  const [loginDriverPhone, setLoginDriverPhone] = useState('');
+  const [loginDriverName, setLoginDriverName] = useState('');
+  const [driverPassword, setDriverPassword] = useState('');
+  const [loginDriverPassword, setLoginDriverPassword] = useState('');
   const [driverLoginError, setDriverLoginError] = useState('');
+
+  // Auto-restore driver session from localStorage on mount
+  useEffect(() => {
+    const savedId = localStorage.getItem('dem_driver_id');
+    if (savedId) {
+      const savedName = localStorage.getItem('dem_driver_name') || '';
+      const savedPhone = localStorage.getItem('dem_driver_phone') || '';
+      const savedEmail = localStorage.getItem('dem_driver_email') || '';
+      const savedAvatar = localStorage.getItem('dem_driver_avatar') || 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA';
+      const savedLicense = localStorage.getItem('dem_driver_license') || 'D';
+      const savedExperience = localStorage.getItem('dem_driver_experience') || '8';
+      const savedVehicleBrand = localStorage.getItem('dem_driver_vehicle_brand') || '';
+      const savedVehiclePlate = localStorage.getItem('dem_driver_vehicle_plate') || '';
+      const savedVehicleSeats = localStorage.getItem('dem_driver_vehicle_seats') || '';
+      const savedPassword = localStorage.getItem('dem_driver_password') || '';
+
+      if (savedName) setDriverName(savedName);
+      if (savedPhone) setDriverPhone(savedPhone);
+      if (savedEmail) setDriverEmail(savedEmail);
+      if (savedAvatar) setDriverAvatar(savedAvatar);
+      if (savedLicense) setDriverLicense(savedLicense);
+      if (savedExperience) setExperience(savedExperience);
+      if (savedVehicleBrand) setVehicleBrand(savedVehicleBrand);
+      if (savedVehiclePlate) setVehiclePlate(savedVehiclePlate);
+      if (savedVehicleSeats) setVehicleSeats(savedVehicleSeats);
+      if (savedPassword) setDriverPassword(savedPassword);
+
+      if (currentScreen === 'login' || currentScreen === 'register') {
+        setScreen('portal');
+      }
+    }
+  }, []);
+
+  // Sound Notification logic for incoming bookings
+  const seenBookingsRef = useRef<Set<string>>(new Set());
+  const isFirstLoadRef = useRef(true);
+
+  useEffect(() => {
+    if (!bookings || bookings.length === 0) return;
+
+    const myPendingBookings = bookings.filter((b) => {
+      const cleanDriverPhone = driverPhone ? driverPhone.replace(/\D/g, '') : '';
+      const cleanBookingPhone = b.driverPhone ? b.driverPhone.replace(/\D/g, '') : '';
+      
+      const isMyBooking = (cleanDriverPhone && cleanBookingPhone && (cleanBookingPhone.endsWith(cleanDriverPhone) || cleanDriverPhone.endsWith(cleanBookingPhone))) ||
+                          (driverName && b.driverName && b.driverName.toLowerCase().trim() === driverName.toLowerCase().trim());
+      return isMyBooking && b.status === 'pending';
+    });
+
+    if (isFirstLoadRef.current) {
+      myPendingBookings.forEach(b => seenBookingsRef.current.add(b.id));
+      isFirstLoadRef.current = false;
+      return;
+    }
+
+    let hasNewBooking = false;
+    myPendingBookings.forEach((b) => {
+      if (!seenBookingsRef.current.has(b.id)) {
+        seenBookingsRef.current.add(b.id);
+        hasNewBooking = true;
+      }
+    });
+
+    if (hasNewBooking) {
+      playNotificationSound();
+    }
+  }, [bookings, driverPhone, driverName]);
 
   // Interactivity States
   const [isOnline, setIsOnline] = useState(true);
   const [walletBalance, setWalletBalance] = useState(47500);
   const [isCommissionPaid, setIsCommissionPaid] = useState(false);
   const [driverTrips, setDriverTrips] = useState<DriverTrip[]>([]);
+
+  const currentDriverPhone = driverPhone || localStorage.getItem('dem_driver_phone') || '';
+  const currentDriverName = driverName || localStorage.getItem('dem_driver_name') || '';
+
+  const myBookings = bookings.filter((b) => {
+    const cleanDriverPhone = currentDriverPhone ? currentDriverPhone.replace(/\D/g, '') : '';
+    const cleanBookingPhone = b.driverPhone ? b.driverPhone.replace(/\D/g, '') : '';
+    
+    return (cleanDriverPhone && cleanBookingPhone && (cleanBookingPhone.endsWith(cleanDriverPhone) || cleanDriverPhone.endsWith(cleanBookingPhone))) ||
+           (currentDriverName && b.driverName && b.driverName.toLowerCase().trim() === currentDriverName.toLowerCase().trim());
+  });
 
   useEffect(() => {
     if (isSupabaseConfigured) {
@@ -63,6 +185,7 @@ export default function DriverFlow({
           if (error) {
             console.warn("Error loading driver trips from Supabase:", error.message);
           } else if (data && data.length > 0) {
+            const currentDriverId = localStorage.getItem('dem_driver_id') || '';
             const mapped: DriverTrip[] = data.map((t: any) => ({
               id: t.id,
               from: t.from,
@@ -73,8 +196,25 @@ export default function DriverFlow({
               maxPassengers: Number(t.max_passengers),
               status: t.status as any,
               boardingPlace: t.boarding_place || undefined,
+              driverId: t.driver_id,
+              driverName: t.driver_name,
+              driverPhone: t.driver_phone,
+              driverAvatar: t.driver_avatar,
+              vehicleName: t.vehicle_name,
+              vehiclePlate: t.vehicle_plate,
+              price: t.price ? Number(t.price) : undefined,
             }));
-            setDriverTrips(mapped);
+
+            // Filter trips: only show trips that belong to this driver!
+            const filtered = mapped.filter((t) => {
+              if (!currentDriverPhone && !currentDriverId) return false;
+              const cleanTripPhone = t.driverPhone ? t.driverPhone.replace(/\D/g, '') : '';
+              const cleanDriverPhone = currentDriverPhone ? currentDriverPhone.replace(/\D/g, '') : '';
+              return (cleanDriverPhone && cleanTripPhone && (cleanTripPhone.endsWith(cleanDriverPhone) || cleanDriverPhone.endsWith(cleanTripPhone))) ||
+                     (t.driverId && t.driverId === currentDriverId);
+            });
+
+            setDriverTrips(filtered);
           } else {
             setDriverTrips([]);
           }
@@ -86,8 +226,54 @@ export default function DriverFlow({
 
       const interval = setInterval(fetchDriverTrips, 1000);
       return () => clearInterval(interval);
+    } else {
+      // Fallback when Supabase is NOT configured
+      const loadLocalDriverTrips = () => {
+        try {
+          const savedDrivers = localStorage.getItem('dem_available_drivers');
+          if (savedDrivers) {
+            const driversList = JSON.parse(savedDrivers);
+            const currentDriverId = localStorage.getItem('dem_driver_id') || '';
+            const cleanDriverPhone = currentDriverPhone ? currentDriverPhone.replace(/\D/g, '') : '';
+            
+            const trips = driversList
+              .filter((d: any) => d.isDriverTrip)
+              .map((d: any) => ({
+                id: d.id,
+                from: d.from || 'Dakar',
+                to: d.terminus || 'Touba',
+                date: d.date || '',
+                time: d.departureTime || '12:00',
+                passengerCount: Number(d.passengerCount || 0),
+                maxPassengers: Number(d.maxPassengers || 15),
+                status: (d.seatsAvailable === 0 ? 'completed' : 'pending') as any,
+                boardingPlace: d.boardingPlace,
+                driverId: currentDriverId,
+                driverName: d.name,
+                driverPhone: d.phone,
+                driverAvatar: d.avatar,
+                vehicleName: d.vehicleName,
+                vehiclePlate: d.vehiclePlate,
+                price: Number(d.price || 6500)
+              }))
+              .filter((t: any) => {
+                const cleanTripPhone = t.driverPhone ? t.driverPhone.replace(/\D/g, '') : '';
+                return (cleanDriverPhone && cleanTripPhone && (cleanTripPhone.endsWith(cleanDriverPhone) || cleanDriverPhone.endsWith(cleanTripPhone))) ||
+                       (t.driverId && t.driverId === currentDriverId);
+              });
+            setDriverTrips(trips);
+          } else {
+            setDriverTrips(INITIAL_DRIVER_TRIPS);
+          }
+        } catch (e) {
+          setDriverTrips(INITIAL_DRIVER_TRIPS);
+        }
+      };
+      loadLocalDriverTrips();
+      const interval = setInterval(loadLocalDriverTrips, 1000);
+      return () => clearInterval(interval);
     }
-  }, []);
+  }, [driverPhone, currentDriverPhone, currentDriverName]);
 
   useEffect(() => {
     if (isSupabaseConfigured && driverPhone) {
@@ -427,6 +613,14 @@ export default function DriverFlow({
       return;
     }
     const formattedDate = formatToFrenchDate(newTripDate);
+    const activeDriverId = localStorage.getItem('dem_driver_id') || `driver_${Date.now()}`;
+    
+    const currentName = driverName || localStorage.getItem('dem_driver_name') || "Chauffeur";
+    const currentPhone = driverPhone || localStorage.getItem('dem_driver_phone') || "+221 77 000 00 00";
+    const currentAvatar = driverAvatar || localStorage.getItem('dem_driver_avatar') || "https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA";
+    const currentBrand = vehicleBrand || localStorage.getItem('dem_driver_vehicle_brand') || "Toyota Hiace";
+    const currentPlate = vehiclePlate || localStorage.getItem('dem_driver_vehicle_plate') || "DK-4521-A";
+
     const newTrip: DriverTrip = {
       id: `dt-${Date.now()}`,
       from: newTripFrom,
@@ -436,7 +630,14 @@ export default function DriverFlow({
       passengerCount: 0,
       maxPassengers: Number(newTripSeats) || 15,
       status: 'pending',
-      boardingPlace: newTripBoardingPlace || undefined
+      boardingPlace: newTripBoardingPlace || undefined,
+      driverId: activeDriverId,
+      driverName: currentName,
+      driverPhone: currentPhone,
+      driverAvatar: currentAvatar,
+      vehicleName: currentBrand,
+      vehiclePlate: currentPlate,
+      price: 6500
     };
     setDriverTrips([newTrip, ...driverTrips]);
 
@@ -449,18 +650,18 @@ export default function DriverFlow({
       }
       const newSearchDriver = {
         id: newTrip.id,
-        name: driverName || "Moussa Diop",
-        avatar: driverAvatar || "https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA",
+        name: newTrip.driverName,
+        avatar: newTrip.driverAvatar,
         rating: 4.9,
         tripsCount: 142,
-        vehicleName: vehicleBrand || "Toyota Hiace",
-        vehiclePlate: vehiclePlate || "DK-4521-A",
+        vehicleName: newTrip.vehicleName,
+        vehiclePlate: newTrip.vehiclePlate,
         departureTime: newTrip.time,
         terminus: newTrip.to,
         seatsAvailable: newTrip.maxPassengers,
-        price: 6500,
+        price: newTrip.price,
         verified: 'CONFIRMÉ',
-        phone: driverPhone || '+221 77 452 11 00',
+        phone: newTrip.driverPhone,
         isDriverTrip: true,
         passengerCount: 0,
         maxPassengers: newTrip.maxPassengers,
@@ -473,9 +674,9 @@ export default function DriverFlow({
       console.warn("Error syncing to dem_available_drivers:", err);
     }
     
-    // Sync to Supabase
+    // Sync to Supabase with automatic missing column filtering fallback
     if (isSupabaseConfigured) {
-      supabase.from('driver_trips').insert([{
+      const tripPayload: any = {
         id: newTrip.id,
         from: newTrip.from,
         to: newTrip.to,
@@ -485,9 +686,62 @@ export default function DriverFlow({
         max_passengers: newTrip.maxPassengers,
         status: newTrip.status,
         boarding_place: newTrip.boardingPlace,
-      }]).then(({ error }) => {
-        if (error) console.warn("Error inserting driver trip to Supabase:", error.message);
-      });
+        driver_id: newTrip.driverId,
+        driver_name: newTrip.driverName,
+        driver_phone: newTrip.driverPhone,
+        driver_avatar: newTrip.driverAvatar,
+        vehicle_name: newTrip.vehicleName,
+        vehicle_plate: newTrip.vehiclePlate,
+        price: newTrip.price
+      };
+
+      const syncTripToSupabase = async () => {
+        let attempts = 0;
+        let success = false;
+        let lastError: any = null;
+
+        while (attempts < 8 && !success) {
+          const { error } = await supabase
+            .from('driver_trips')
+            .insert([tripPayload]);
+
+          if (!error) {
+            success = true;
+            break;
+          }
+
+          lastError = error;
+          console.warn(`Driver trip insert attempt ${attempts} failed:`, error.message);
+
+          let missingColumn: string | null = null;
+          const matchSingleQuote = error.message.match(/column '([^']+)'/i) || error.message.match(/'([^']+)' column/i);
+          if (matchSingleQuote && matchSingleQuote[1]) {
+            missingColumn = matchSingleQuote[1];
+          } else if (error.message.toLowerCase().includes('column')) {
+            const words = error.message.replace(/['"]/g, '').split(/\s+/);
+            for (const key of Object.keys(tripPayload)) {
+              if (words.includes(key)) {
+                missingColumn = key;
+                break;
+              }
+            }
+          }
+
+          if (missingColumn && tripPayload[missingColumn] !== undefined) {
+            console.warn(`Removing missing column '${missingColumn}' from trip payload and retrying...`);
+            delete tripPayload[missingColumn];
+          } else {
+            break;
+          }
+          attempts++;
+        }
+
+        if (lastError && !success) {
+          console.warn("Could not insert driver trip to Supabase after retries:", lastError.message);
+        }
+      };
+
+      syncTripToSupabase();
     }
 
     setIsCreateModalOpen(false);
@@ -498,64 +752,63 @@ export default function DriverFlow({
   // Submit become driver
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!driverName.trim()) {
+    const cleanName = sanitizeInput(driverName.trim());
+    const cleanPhone = driverPhone.trim();
+    const cleanEmail = driverEmail ? sanitizeInput(driverEmail.trim()) : '';
+    const cleanBrand = vehicleBrand ? sanitizeInput(vehicleBrand.trim()) : '';
+    const cleanPlate = vehiclePlate ? sanitizeInput(vehiclePlate.trim()) : '';
+
+    if (!cleanName) {
       setDriverLoginError('Le nom complet est obligatoire');
       return;
     }
-    if (!driverPhone.trim()) {
+    if (!cleanPhone) {
       setDriverLoginError('Le numéro de téléphone est obligatoire');
       return;
     }
+    if (!validatePhone(cleanPhone)) {
+      setDriverLoginError('Format de téléphone invalide. Utilisez un numéro sénégalais valide (ex: 771234567 ou +221771234567).');
+      return;
+    }
+    if (!driverPassword.trim()) {
+      setDriverLoginError('Le mot de passe est obligatoire');
+      return;
+    }
+
+    const secureHashedPassword = await hashPassword(driverPassword.trim());
 
     if (isSupabaseConfigured) {
       try {
         const { data: existingDriver, error: checkError } = await supabase
           .from('drivers')
           .select('*')
-          .eq('phone', driverPhone.trim());
+          .eq('phone', cleanPhone);
 
         if (checkError) {
           console.warn('Check existing driver error:', checkError.message);
         }
 
         if (existingDriver && existingDriver.length > 0) {
-          const matchedDriver = existingDriver[0];
-          setDriverName(matchedDriver.name);
-          setDriverPhone(matchedDriver.phone);
-          if (matchedDriver.avatar) setDriverAvatar(matchedDriver.avatar);
-          if (matchedDriver.vehicle_name) setVehicleBrand(matchedDriver.vehicle_name);
-          if (matchedDriver.vehicle_plate) setVehiclePlate(matchedDriver.vehicle_plate);
-          if (matchedDriver.seats_available) setVehicleSeats(String(matchedDriver.seats_available));
-          setIsOnline(!!matchedDriver.is_online);
-
-          localStorage.setItem('dem_driver_id', matchedDriver.id);
-          localStorage.setItem('dem_driver_name', matchedDriver.name);
-          localStorage.setItem('dem_driver_phone', matchedDriver.phone);
-          if (matchedDriver.avatar) localStorage.setItem('dem_driver_avatar', matchedDriver.avatar);
-          if (matchedDriver.vehicle_name) localStorage.setItem('dem_driver_vehicle_brand', matchedDriver.vehicle_name);
-          if (matchedDriver.vehicle_plate) localStorage.setItem('dem_driver_vehicle_plate', matchedDriver.vehicle_plate);
-          if (matchedDriver.seats_available) localStorage.setItem('dem_driver_vehicle_seats', String(matchedDriver.seats_available));
-
-          setDriverLoginError('');
-          setScreen('portal');
+          setDriverLoginError('Ce numéro de téléphone est déjà associé à un compte chauffeur. Veuillez vous connecter.');
           return;
         }
 
         const id = 'driver_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         const driverData: any = {
           id,
-          name: driverName,
+          name: cleanName,
           avatar: driverAvatar || 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA',
           rating: 4.8,
           trips_count: 0,
-          vehicle_name: vehicleBrand || 'Toyota Hiace',
-          vehicle_plate: vehiclePlate || 'DK-4521-A',
+          vehicle_name: cleanBrand || 'Toyota Hiace',
+          vehicle_plate: cleanPlate || 'DK-4521-A',
           departure_time: '08:00',
           terminus: 'Tivaouane',
           seats_available: parseInt(vehicleSeats) || 15,
           price: 6000,
           verified: 'VÉRIFIÉE',
-          phone: driverPhone,
+          phone: cleanPhone,
+          password: secureHashedPassword,
           boarding_place: 'Dakar',
           is_online: true
         };
@@ -605,23 +858,26 @@ export default function DriverFlow({
         }
 
         localStorage.setItem('dem_driver_id', id);
-        localStorage.setItem('dem_driver_name', driverName);
-        localStorage.setItem('dem_driver_phone', driverPhone);
-        localStorage.setItem('dem_driver_email', driverEmail);
+        localStorage.setItem('dem_driver_name', cleanName);
+        localStorage.setItem('dem_driver_phone', cleanPhone);
+        localStorage.setItem('dem_driver_email', cleanEmail);
         localStorage.setItem('dem_driver_license', licenseType);
         localStorage.setItem('dem_driver_experience', experienceYears);
-        localStorage.setItem('dem_driver_vehicle_brand', vehicleBrand);
-        localStorage.setItem('dem_driver_vehicle_plate', vehiclePlate);
+        localStorage.setItem('dem_driver_vehicle_brand', cleanBrand);
+        localStorage.setItem('dem_driver_vehicle_plate', cleanPlate);
         localStorage.setItem('dem_driver_vehicle_seats', vehicleSeats);
         localStorage.setItem('dem_driver_avatar', driverAvatar);
+        localStorage.setItem('dem_driver_password', secureHashedPassword);
       } catch (err: any) {
         console.warn('Failed to register driver in Supabase (falling back to local):', err);
-        localStorage.setItem('dem_driver_name', driverName);
-        localStorage.setItem('dem_driver_phone', driverPhone);
+        localStorage.setItem('dem_driver_name', cleanName);
+        localStorage.setItem('dem_driver_phone', cleanPhone);
+        localStorage.setItem('dem_driver_password', secureHashedPassword);
       }
     } else {
-      localStorage.setItem('dem_driver_name', driverName);
-      localStorage.setItem('dem_driver_phone', driverPhone);
+      localStorage.setItem('dem_driver_name', cleanName);
+      localStorage.setItem('dem_driver_phone', cleanPhone);
+      localStorage.setItem('dem_driver_password', secureHashedPassword);
     }
 
     setDriverLoginError('');
@@ -631,24 +887,28 @@ export default function DriverFlow({
   // Submit driver login
   const handleDriverLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginDriverName.trim()) {
-      setDriverLoginError('Veuillez saisir votre nom complet');
+    const cleanLoginPhone = loginDriverPhone.trim();
+    if (!cleanLoginPhone) {
+      setDriverLoginError('Veuillez saisir votre numéro de téléphone');
       return;
     }
-    if (!loginDriverPhone.trim()) {
-      setDriverLoginError('Veuillez saisir votre numéro de téléphone');
+    if (!validatePhone(cleanLoginPhone)) {
+      setDriverLoginError('Format de téléphone invalide.');
+      return;
+    }
+    if (!loginDriverPassword.trim()) {
+      setDriverLoginError('Veuillez saisir votre mot de passe');
       return;
     }
 
     if (isSupabaseConfigured) {
       try {
-        const cleanPhone = loginDriverPhone.trim();
-        const phoneQueries = [cleanPhone];
-        if (!cleanPhone.startsWith('+221')) {
-          phoneQueries.push('+221 ' + cleanPhone);
-          phoneQueries.push('+221' + cleanPhone);
+        const phoneQueries = [cleanLoginPhone];
+        if (!cleanLoginPhone.startsWith('+221')) {
+          phoneQueries.push('+221 ' + cleanLoginPhone);
+          phoneQueries.push('+221' + cleanLoginPhone);
         } else {
-          phoneQueries.push(cleanPhone.replace(/^\+221\s*/, ''));
+          phoneQueries.push(cleanLoginPhone.replace(/^\+221\s*/, ''));
         }
 
         const { data, error } = await supabase
@@ -658,16 +918,44 @@ export default function DriverFlow({
 
         if (error) {
           console.warn('Supabase driver login error (falling back to local):', error.message);
-          setDriverName(loginDriverName);
-          setDriverPhone(loginDriverPhone);
-          setDriverLoginError('');
-          setScreen('portal');
-          return;
+          // Local fallback
+          const localPhone = localStorage.getItem('dem_driver_phone');
+          const localPassword = localStorage.getItem('dem_driver_password');
+          const localName = localStorage.getItem('dem_driver_name') || 'Chauffeur';
+          
+          const isMatch = localPassword ? await verifyPassword(loginDriverPassword, localPassword) : false;
+          if (localPhone === cleanLoginPhone && isMatch) {
+            setDriverName(localName);
+            setDriverPhone(cleanLoginPhone);
+            setScreen('portal');
+            return;
+          } else {
+            // Local fallback auto-creation with hash
+            const id = 'driver_' + Date.now();
+            const defaultName = "Chauffeur " + cleanLoginPhone.slice(-4);
+            const secureHashedPassword = await hashPassword(loginDriverPassword);
+            setDriverName(defaultName);
+            setDriverPhone(cleanLoginPhone);
+            localStorage.setItem('dem_driver_id', id);
+            localStorage.setItem('dem_driver_name', defaultName);
+            localStorage.setItem('dem_driver_phone', cleanLoginPhone);
+            localStorage.setItem('dem_driver_password', secureHashedPassword);
+            alert("Aucun compte chauffeur local existant. Un nouveau compte sécurisé a été automatiquement créé !");
+            setScreen('portal');
+            return;
+          }
         }
 
         const matchedDriver = data && data.length > 0 ? data[0] : null;
 
         if (matchedDriver) {
+          if (matchedDriver.password !== undefined && matchedDriver.password !== null) {
+            const isMatch = await verifyPassword(loginDriverPassword, matchedDriver.password);
+            if (!isMatch) {
+              setDriverLoginError('Mot de passe incorrect');
+              return;
+            }
+          }
           setDriverName(matchedDriver.name);
           setDriverPhone(matchedDriver.phone);
           if (matchedDriver.avatar) setDriverAvatar(matchedDriver.avatar);
@@ -683,91 +971,136 @@ export default function DriverFlow({
           if (matchedDriver.vehicle_name) localStorage.setItem('dem_driver_vehicle_brand', matchedDriver.vehicle_name);
           if (matchedDriver.vehicle_plate) localStorage.setItem('dem_driver_vehicle_plate', matchedDriver.vehicle_plate);
           if (matchedDriver.seats_available) localStorage.setItem('dem_driver_vehicle_seats', String(matchedDriver.seats_available));
+          if (matchedDriver.password) localStorage.setItem('dem_driver_password', matchedDriver.password);
         } else {
-          // Si le chauffeur n'existe pas encore, on le crée en tant que nouveau partenaire de démo
-          const id = 'driver_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-          const driverData: any = {
+          // AUTO REGISTER DRIVER ON SUPABASE!
+          const id = 'driver_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+          const defaultName = "Chauffeur " + cleanLoginPhone.slice(-4);
+          const secureHashedPassword = await hashPassword(loginDriverPassword);
+          const driverData = {
             id,
-            name: loginDriverName,
-            avatar: driverAvatar || 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA',
-            rating: 4.8,
-            trips_count: 12,
-            vehicle_name: vehicleBrand || 'Toyota Hiace',
-            vehicle_plate: vehiclePlate || 'DK-4521-A',
+            name: defaultName,
+            phone: cleanLoginPhone,
+            password: secureHashedPassword,
+            avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA',
+            vehicle_name: 'Hiace Sedima',
+            vehicle_plate: 'DK-4521-A',
             departure_time: '08:00',
             terminus: 'Tivaouane',
-            seats_available: parseInt(vehicleSeats) || 15,
+            seats_available: 15,
             price: 6000,
             verified: 'VÉRIFIÉE',
-            phone: loginDriverPhone,
-            boarding_place: 'Dakar',
             is_online: true
           };
 
-          let insertAttempts = 0;
-          let insertSuccess = false;
-          let lastInsertError: any = null;
+          const { error: insertError } = await supabase
+            .from('drivers')
+            .insert([driverData]);
 
-          while (insertAttempts < 6 && !insertSuccess) {
-            const { error: insertError } = await supabase
-              .from('drivers')
-              .insert([driverData]);
-
-            if (!insertError) {
-              insertSuccess = true;
-              break;
-            }
-
-            lastInsertError = insertError;
-            console.warn(`Driver auto-registration insert attempt ${insertAttempts} failed:`, insertError.message);
-
-            let missingColumn: string | null = null;
-            const matchSingleQuote = insertError.message.match(/column '([^']+)'/i) || insertError.message.match(/'([^']+)' column/i);
-            if (matchSingleQuote && matchSingleQuote[1]) {
-              missingColumn = matchSingleQuote[1];
-            } else if (insertError.message.toLowerCase().includes('column')) {
-              const words = insertError.message.replace(/['"]/g, '').split(/\s+/);
-              for (const key of Object.keys(driverData)) {
-                if (words.includes(key)) {
-                  missingColumn = key;
-                  break;
-                }
-              }
-            }
-
-            if (missingColumn && driverData[missingColumn] !== undefined) {
-              console.warn(`Removing missing column '${missingColumn}' from login payload and retrying...`);
-              delete driverData[missingColumn];
-            } else {
-              break;
-            }
-            insertAttempts++;
+          if (insertError) {
+            console.warn("Supabase driver auto-registration failed:", insertError.message);
+            setDriverLoginError("La création du compte chauffeur a échoué: " + insertError.message);
+            return;
           }
 
-          if (lastInsertError && !insertSuccess) {
-            console.warn('Auto-registration error on driver login:', lastInsertError.message);
-          }
-
-          setDriverName(loginDriverName);
-          setDriverPhone(loginDriverPhone);
+          setDriverName(driverData.name);
+          setDriverPhone(driverData.phone);
+          setDriverAvatar(driverData.avatar);
+          setVehicleBrand(driverData.vehicle_name);
+          setVehiclePlate(driverData.vehicle_plate);
+          setVehicleSeats(String(driverData.seats_available));
           setIsOnline(true);
 
           localStorage.setItem('dem_driver_id', id);
-          localStorage.setItem('dem_driver_name', loginDriverName);
-          localStorage.setItem('dem_driver_phone', loginDriverPhone);
+          localStorage.setItem('dem_driver_name', driverData.name);
+          localStorage.setItem('dem_driver_phone', driverData.phone);
+          localStorage.setItem('dem_driver_avatar', driverData.avatar);
+          localStorage.setItem('dem_driver_vehicle_brand', driverData.vehicle_name);
+          localStorage.setItem('dem_driver_vehicle_plate', driverData.vehicle_plate);
+          localStorage.setItem('dem_driver_vehicle_seats', String(driverData.seats_available));
+          localStorage.setItem('dem_driver_password', driverData.password);
+          alert("Votre compte chauffeur a été créé automatiquement avec succès sur Supabase ! Bienvenue.");
         }
       } catch (err: any) {
         console.warn('Unexpected error in login (falling back to local):', err.message);
-        setDriverName(loginDriverName);
-        setDriverPhone(loginDriverPhone);
+        const localPhone = localStorage.getItem('dem_driver_phone');
+        const localPassword = localStorage.getItem('dem_driver_password');
+        const localName = localStorage.getItem('dem_driver_name') || 'Chauffeur';
+        
+        const isMatch = localPassword ? await verifyPassword(loginDriverPassword, localPassword) : false;
+        if (localPhone === cleanLoginPhone && isMatch) {
+          setDriverName(localName);
+          setDriverPhone(cleanLoginPhone);
+          setScreen('portal');
+          return;
+        } else {
+          // Local fallback auto-creation
+          const id = 'driver_' + Date.now();
+          const defaultName = "Chauffeur " + cleanLoginPhone.slice(-4);
+          const secureHashedPassword = await hashPassword(loginDriverPassword);
+          setDriverName(defaultName);
+          setDriverPhone(cleanLoginPhone);
+          localStorage.setItem('dem_driver_id', id);
+          localStorage.setItem('dem_driver_name', defaultName);
+          localStorage.setItem('dem_driver_phone', cleanLoginPhone);
+          localStorage.setItem('dem_driver_password', secureHashedPassword);
+          alert("Nouveau compte chauffeur créé automatiquement en mode local !");
+          setScreen('portal');
+          return;
+        }
       }
     } else {
-      setDriverName(loginDriverName);
-      setDriverPhone(loginDriverPhone);
+      const localPhone = localStorage.getItem('dem_driver_phone');
+      const localPassword = localStorage.getItem('dem_driver_password');
+      const localName = localStorage.getItem('dem_driver_name') || 'Chauffeur';
+      
+      const isMatch = localPassword ? await verifyPassword(loginDriverPassword, localPassword) : false;
+      if (localPhone === cleanLoginPhone && isMatch) {
+        setDriverName(localName);
+        setDriverPhone(cleanLoginPhone);
+        localStorage.setItem('dem_driver_id', localStorage.getItem('dem_driver_id') || 'driver_' + Date.now());
+      } else {
+        const id = 'driver_' + Date.now();
+        const defaultName = "Chauffeur " + cleanLoginPhone.slice(-4);
+        const secureHashedPassword = await hashPassword(loginDriverPassword);
+        setDriverName(defaultName);
+        setDriverPhone(cleanLoginPhone);
+        localStorage.setItem('dem_driver_id', id);
+        localStorage.setItem('dem_driver_name', defaultName);
+        localStorage.setItem('dem_driver_phone', cleanLoginPhone);
+        localStorage.setItem('dem_driver_password', secureHashedPassword);
+        alert("Votre compte chauffeur local a été créé automatiquement avec succès !");
+      }
     }
 
     setDriverLoginError('');
     setScreen('portal');
+  };
+
+  const handleLogout = () => {
+    setDriverName('');
+    setDriverPhone('');
+    setDriverEmail('');
+    setVehicleBrand('');
+    setVehiclePlate('');
+    setVehicleSeats('');
+    setLoginDriverPhone('');
+    setLoginDriverPassword('');
+    
+    localStorage.removeItem('dem_driver_id');
+    localStorage.removeItem('dem_driver_name');
+    localStorage.removeItem('dem_driver_phone');
+    localStorage.removeItem('dem_driver_password');
+    localStorage.removeItem('dem_driver_avatar');
+    localStorage.removeItem('dem_driver_vehicle_brand');
+    localStorage.removeItem('dem_driver_vehicle_plate');
+    localStorage.removeItem('dem_driver_vehicle_seats');
+    localStorage.removeItem('dem_driver_email');
+    localStorage.removeItem('dem_driver_license');
+    localStorage.removeItem('dem_driver_experience');
+    
+    onBackToWelcome();
+    setScreen('login');
   };
 
   // Trigger simulated Refresh of demands
@@ -935,6 +1268,18 @@ export default function DriverFlow({
                       />
                     </div>
                   </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block font-sans font-semibold text-[11px] text-[#10204A]">Mot de passe</label>
+                    <input
+                      type="password"
+                      required
+                      value={driverPassword}
+                      onChange={(e) => setDriverPassword(e.target.value)}
+                      className="w-full h-11 bg-white border border-gray-200 rounded-xl px-4 text-xs font-sans focus:outline-none focus:border-[#3d5ba9] transition-all"
+                      placeholder="••••••••"
+                    />
+                  </div>
                 </section>
 
                 {/* SECTION 2: Professional Details */}
@@ -1100,18 +1445,6 @@ export default function DriverFlow({
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="block font-sans font-semibold text-[11px] text-[#10204A]">Nom Complet</label>
-                    <input
-                      type="text"
-                      required
-                      value={loginDriverName}
-                      onChange={(e) => setLoginDriverName(e.target.value)}
-                      className="w-full h-11 bg-white border border-gray-200 rounded-xl px-4 text-xs font-sans focus:outline-none focus:border-[#3d5ba9] transition-all"
-                      placeholder="Prénom et Nom"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
                     <label className="block font-sans font-semibold text-[11px] text-[#10204A]">Téléphone</label>
                     <div className="flex h-11">
                       <div className="flex items-center justify-center px-3 bg-gray-100 border border-r-0 border-gray-200 rounded-l-xl font-mono text-xs text-gray-500">
@@ -1126,6 +1459,18 @@ export default function DriverFlow({
                         placeholder="77 452 11 00"
                       />
                     </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block font-sans font-semibold text-[11px] text-[#10204A]">Mot de passe</label>
+                    <input
+                      type="password"
+                      required
+                      value={loginDriverPassword}
+                      onChange={(e) => setLoginDriverPassword(e.target.value)}
+                      className="w-full h-11 bg-white border border-gray-200 rounded-xl px-4 text-xs font-sans focus:outline-none focus:border-[#3d5ba9] transition-all"
+                      placeholder="••••••••"
+                    />
                   </div>
                 </section>
 
@@ -1452,7 +1797,7 @@ export default function DriverFlow({
                       : 'text-gray-500 hover:bg-gray-200/50'
                   }`}
                 >
-                  Alertes ({bookings.filter(b => b.status === 'pending').length})
+                  Alertes ({myBookings.filter(b => b.status === 'pending').length})
                 </button>
                 <button
                   onClick={() => setPortalTab('upcoming')}
@@ -1462,7 +1807,7 @@ export default function DriverFlow({
                       : 'text-gray-500 hover:bg-gray-200/50'
                   }`}
                 >
-                  Bientôt ({upcomingTrips.length + bookings.filter(b => b.status === 'accepted' || b.status === 'active').length})
+                  Bientôt ({upcomingTrips.length + myBookings.filter(b => b.status === 'accepted' || b.status === 'active').length})
                 </button>
                 <button
                   onClick={() => setPortalTab('completed')}
@@ -1472,7 +1817,7 @@ export default function DriverFlow({
                       : 'text-gray-500 hover:bg-gray-200/50'
                   }`}
                 >
-                  Terminées ({completedTrips.length + bookings.filter(b => b.status === 'completed').length})
+                  Terminées ({completedTrips.length + myBookings.filter(b => b.status === 'completed').length})
                 </button>
               </div>
 
@@ -1497,9 +1842,9 @@ export default function DriverFlow({
                     </div>
                   </div>
 
-                  {bookings.filter(b => b.status === 'pending').length > 0 ? (
+                  {myBookings.filter(b => b.status === 'pending').length > 0 ? (
                     <div className="space-y-3 mt-2">
-                      {bookings.filter(b => b.status === 'pending').map((b) => (
+                      {myBookings.filter(b => b.status === 'pending').map((b) => (
                         <div
                           key={b.id}
                           className="bg-white rounded-2xl p-4 border border-amber-100 shadow-sm text-left space-y-3 relative overflow-hidden"
@@ -1613,13 +1958,13 @@ export default function DriverFlow({
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-mono text-[10px] text-gray-500 uppercase tracking-widest">Réservations validées</span>
                       <span className="text-xs font-bold text-green-600">
-                        {bookings.filter(b => b.status === 'accepted' || b.status === 'active').length} passagers
+                        {myBookings.filter(b => b.status === 'accepted' || b.status === 'active').length} passagers
                       </span>
                     </div>
 
-                    {bookings.filter(b => b.status === 'accepted' || b.status === 'active').length > 0 ? (
+                    {myBookings.filter(b => b.status === 'accepted' || b.status === 'active').length > 0 ? (
                       <div className="space-y-3">
-                        {bookings.filter(b => b.status === 'accepted' || b.status === 'active').map((b) => (
+                        {myBookings.filter(b => b.status === 'accepted' || b.status === 'active').map((b) => (
                           <div
                             key={b.id}
                             className="bg-white rounded-2xl p-4 border border-green-100 shadow-sm text-left space-y-2 relative"
@@ -1732,13 +2077,13 @@ export default function DriverFlow({
                     <div className="flex items-center justify-between mb-1">
                       <span className="font-mono text-[10px] text-gray-500 uppercase tracking-widest">Réservations clôturées</span>
                       <span className="text-xs font-bold text-green-600">
-                        {bookings.filter(b => b.status === 'completed').length} terminées
+                        {myBookings.filter(b => b.status === 'completed').length} terminées
                       </span>
                     </div>
 
-                    {bookings.filter(b => b.status === 'completed').length > 0 ? (
+                    {myBookings.filter(b => b.status === 'completed').length > 0 ? (
                       <div className="space-y-3">
-                        {bookings.filter(b => b.status === 'completed').map((b) => (
+                        {myBookings.filter(b => b.status === 'completed').map((b) => (
                           <div
                             key={b.id}
                             className="bg-white/70 rounded-2xl p-4 border border-gray-150 shadow-xs text-left space-y-1.5 opacity-90"
@@ -2134,7 +2479,7 @@ export default function DriverFlow({
 
               {/* Logout Chauffeur */}
               <button
-                onClick={onBackToWelcome}
+                onClick={handleLogout}
                 className="w-full py-3 rounded-xl bg-red-50 text-red-600 border border-red-100 font-sans font-bold text-xs flex items-center justify-center gap-2 active:bg-red-100 transition-colors cursor-pointer mt-4"
               >
                 <span className="material-symbols-outlined text-sm">logout</span>

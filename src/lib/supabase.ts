@@ -27,6 +27,7 @@ create table if not exists public.drivers (
   price numeric not null,
   verified text default 'VÉRIFIÉE',
   phone text not null,
+  password text,
   boarding_place text,
   is_online boolean default true,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
@@ -93,8 +94,24 @@ create table if not exists public.driver_trips (
   max_passengers integer default 15,
   status text default 'pending',
   boarding_place text,
+  driver_id text,
+  driver_name text,
+  driver_phone text,
+  driver_avatar text,
+  vehicle_name text,
+  vehicle_plate text,
+  price numeric,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- IMPORTANT: Si votre table driver_trips existe déjà sur Supabase, exécutez ces requêtes SQL dans votre éditeur SQL Supabase :
+-- alter table public.driver_trips add column if not exists driver_id text;
+-- alter table public.driver_trips add column if not exists driver_name text;
+-- alter table public.driver_trips add column if not exists driver_phone text;
+-- alter table public.driver_trips add column if not exists driver_avatar text;
+-- alter table public.driver_trips add column if not exists vehicle_name text;
+-- alter table public.driver_trips add column if not exists vehicle_plate text;
+-- alter table public.driver_trips add column if not exists price numeric;
 
 alter table public.driver_trips enable row level security;
 create policy "Allow public read" on public.driver_trips for select using (true);
@@ -106,6 +123,7 @@ create table if not exists public.passengers (
   id text primary key,
   name text not null,
   phone text not null,
+  password text,
   referral text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );

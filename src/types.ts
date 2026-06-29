@@ -33,6 +33,13 @@ export interface DriverTrip {
   maxPassengers: number;
   status: 'pending' | 'running' | 'completed';
   boardingPlace?: string;
+  driverId?: string;
+  driverName?: string;
+  driverPhone?: string;
+  driverAvatar?: string;
+  vehicleName?: string;
+  vehiclePlate?: string;
+  price?: number;
 }
 
 export interface DriverTransaction {

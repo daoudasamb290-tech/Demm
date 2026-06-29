@@ -9,6 +9,7 @@ import { PassengerBooking } from '../types';
 import { LOCATIONS, SEARCH_DRIVERS, SPECIAL_AIBD_CARD, SearchDriver } from '../data';
 import { supabase, isSupabaseConfigured, SUPABASE_SETUP_SQL } from '../lib/supabase';
 import DestinationCarousel from './DestinationCarousel';
+import { hashPassword, verifyPassword, sanitizeInput, validatePhone } from '../lib/security';
 
 interface PassengerFlowProps {
   bookings: PassengerBooking[];
@@ -59,6 +60,31 @@ const todayFrench = getFrenchDayMonth(todayStr);
 const tomorrowFrench = getFrenchDayMonth(tomorrowStr);
 const afterTomorrowFrench = getFrenchDayMonth(afterTomorrowStr);
 
+const addDaysToISO = (isoStr: string, days: number): string => {
+  const parts = isoStr.split('-');
+  if (parts.length !== 3) return isoStr;
+  const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  d.setDate(d.getDate() + days);
+  return formatDateISO(d);
+};
+
+const getFrenchDayLabel = (dateStr: string): string => {
+  if (dateStr === todayStr) return "Auj.";
+  if (dateStr === tomorrowStr) return "Demain";
+  if (dateStr === afterTomorrowStr) return "Après-dem.";
+
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    let dayName = d.toLocaleDateString('fr-FR', { weekday: 'short' });
+    dayName = dayName.replace('.', '');
+    const dayNum = d.getDate();
+    const capitalizedDay = dayName.replace(/^\w/, (c) => c.toUpperCase());
+    return `${capitalizedDay}. ${dayNum}`;
+  }
+  return dateStr;
+};
+
 export default function PassengerFlow({
   bookings,
   addBooking,
@@ -71,11 +97,13 @@ export default function PassengerFlow({
   const [scrollTop, setScrollTop] = useState(0);
 
   // Passenger Form State
-  const [fullName, setFullName] = useState(() => localStorage.getItem('dem_passenger_name') || '');
-  const [phone, setPhone] = useState(() => localStorage.getItem('dem_passenger_phone') || '');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
   const [referral, setReferral] = useState('');
-  const [loginPhone, setLoginPhone] = useState(() => localStorage.getItem('dem_passenger_phone') || '');
-  const [loginFullName, setLoginFullName] = useState(() => localStorage.getItem('dem_passenger_name') || '');
+  const [loginPhone, setLoginPhone] = useState('');
+  const [loginFullName, setLoginFullName] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
 
   // Regular Booking Custom Pickup and Pricing State
@@ -86,6 +114,7 @@ export default function PassengerFlow({
   // Search State
   const [searchFrom, setSearchFrom] = useState('Dakar');
   const [searchTo, setSearchTo] = useState('Tivaouane');
+  const [calendarBaseDate, setCalendarBaseDate] = useState<string>(todayStr);
   const [searchTab, setSearchTab] = useState<'today' | 'tomorrow' | 'after_tomorrow' | 'custom'>('tomorrow');
   const [selectedDate, setSelectedDate] = useState<string>(tomorrowStr); // Format: YYYY-MM-DD (Default 25 June 2026)
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
@@ -116,6 +145,20 @@ export default function PassengerFlow({
     }
     return dateStr;
   };
+
+  const activeSearchDate = (() => {
+    if (searchTab === 'today') return calendarBaseDate;
+    if (searchTab === 'tomorrow') return addDaysToISO(calendarBaseDate, 1);
+    if (searchTab === 'after_tomorrow') return addDaysToISO(calendarBaseDate, 2);
+    return selectedDate;
+  })();
+
+  const activeSearchDateLabel = (() => {
+    if (activeSearchDate === todayStr) return "Aujourd'hui";
+    if (activeSearchDate === tomorrowStr) return "Demain";
+    if (activeSearchDate === afterTomorrowStr) return "Après-demain";
+    return getFrenchDateLabel(activeSearchDate);
+  })();
   
   const [availableDrivers, setAvailableDrivers] = useState<SearchDriver[]>([]);
 
@@ -178,18 +221,18 @@ export default function PassengerFlow({
 
               return {
                 id: t.id,
-                name: "Moussa Diop",
-                avatar: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA',
+                name: t.driver_name || "Moussa Diop",
+                avatar: t.driver_avatar || 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA',
                 rating: 4.9,
                 tripsCount: 142,
-                vehicleName: maxP === 15 ? 'Toyota Hiace' : maxP === 7 ? 'Peugeot Espace (7 places)' : 'Berline Privée (4 places)',
-                vehiclePlate: 'DK-4521-A',
+                vehicleName: t.vehicle_name || (maxP === 15 ? 'Toyota Hiace' : maxP === 7 ? 'Peugeot Espace (7 places)' : 'Berline Privée (4 places)'),
+                vehiclePlate: t.vehicle_plate || 'DK-4521-A',
                 departureTime: t.time || '12:00',
                 terminus: t.to || 'Touba',
                 seatsAvailable: seatsLeft,
-                price: 6500,
+                price: t.price ? Number(t.price) : 6500,
                 verified: seatsLeft === 0 ? 'COMPLET' : 'CONFIRMÉ' as any,
-                phone: '+221 77 452 11 00',
+                phone: t.driver_phone || '+221 77 452 11 00',
                 isDriverTrip: true,
                 passengerCount: curP,
                 maxPassengers: maxP,
@@ -210,6 +253,25 @@ export default function PassengerFlow({
       fetchDrivers();
 
       const interval = setInterval(fetchDrivers, 1000);
+      return () => clearInterval(interval);
+    } else {
+      // Fallback when Supabase is NOT configured
+      const loadLocalDrivers = () => {
+        try {
+          const savedLocalDrivers = localStorage.getItem('dem_available_drivers');
+          if (savedLocalDrivers) {
+            setAvailableDrivers(JSON.parse(savedLocalDrivers));
+          } else {
+            // Save search drivers to localStorage as initial value
+            localStorage.setItem('dem_available_drivers', JSON.stringify(SEARCH_DRIVERS));
+            setAvailableDrivers(SEARCH_DRIVERS);
+          }
+        } catch (err) {
+          setAvailableDrivers(SEARCH_DRIVERS);
+        }
+      };
+      loadLocalDrivers();
+      const interval = setInterval(loadLocalDrivers, 1000);
       return () => clearInterval(interval);
     }
   }, []);
@@ -253,43 +315,53 @@ export default function PassengerFlow({
 
       // 3. Date Filter (Today, Tomorrow, After-tomorrow, or Custom)
       const matchesSelectedDate = (driverDate: string | undefined, tab: 'today' | 'tomorrow' | 'after_tomorrow' | 'custom') => {
-        if (!driverDate) return tab === 'today';
-        const normalizedDate = driverDate.toLowerCase().trim();
-        
-        // Define target dates in both ISO and French labels
-        const todayFr = todayFrench.toLowerCase();
-        const tomorrowFr = tomorrowFrench.toLowerCase();
-        const afterTomorrowFr = afterTomorrowFrench.toLowerCase();
-        const selectedFr = getFrenchDayMonth(selectedDate).toLowerCase();
+        const activeSearchDate = (() => {
+          if (tab === 'today') return calendarBaseDate;
+          if (tab === 'tomorrow') return addDaysToISO(calendarBaseDate, 1);
+          if (tab === 'after_tomorrow') return addDaysToISO(calendarBaseDate, 2);
+          return selectedDate;
+        })();
 
-        if (tab === 'today') {
-          return normalizedDate === "aujourd'hui" || normalizedDate === "aujourd’hui" || normalizedDate.includes("today") || normalizedDate.includes(todayFr) || normalizedDate.includes(todayStr);
+        if (!driverDate) return activeSearchDate === todayStr;
+        const normalizedDate = driverDate.toLowerCase().trim();
+
+        // 1. Check if the driver date matches the exact ISO string
+        if (normalizedDate === activeSearchDate) return true;
+
+        // 2. Check if the driver date matches the French day-month label
+        const targetFr = getFrenchDayMonth(activeSearchDate).toLowerCase();
+        if (normalizedDate.includes(targetFr)) return true;
+
+        // 3. Check for special relative day keywords if the activeSearchDate corresponds to real-world days
+        if (activeSearchDate === todayStr) {
+          if (normalizedDate === "aujourd'hui" || normalizedDate === "aujourd’hui" || normalizedDate.includes("today")) return true;
         }
-        if (tab === 'tomorrow') {
-          return normalizedDate === "demain" || normalizedDate.includes("tomorrow") || normalizedDate.includes(tomorrowFr) || normalizedDate.includes(tomorrowStr);
+        if (activeSearchDate === tomorrowStr) {
+          if (normalizedDate === "demain" || normalizedDate.includes("tomorrow")) return true;
         }
-        if (tab === 'after_tomorrow') {
-          return normalizedDate === "après-demain" || normalizedDate === "apres-demain" || normalizedDate.includes("after_tomorrow") || normalizedDate.includes(afterTomorrowFr) || normalizedDate.includes(afterTomorrowStr);
+        if (activeSearchDate === afterTomorrowStr) {
+          if (normalizedDate === "après-demain" || normalizedDate === "apres-demain" || normalizedDate.includes("after_tomorrow")) return true;
         }
-        if (tab === 'custom') {
-          const parts = selectedDate.split('-');
-          if (parts.length === 3) {
-            const day = parseInt(parts[2], 10);
-            const monthIndex = parseInt(parts[1], 10) - 1;
-            const monthsShort = [
-              'janv', 'févr', 'mars', 'avril', 'mai', 'juin',
-              'juil', 'août', 'sept', 'oct', 'nov', 'déc'
-            ];
-            const monthsFull = [
-              'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-              'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
-            ];
-            const shortStr = `${day} ${monthsShort[monthIndex]}`.toLowerCase();
-            const fullStr = `${day} ${monthsFull[monthIndex]}`.toLowerCase();
-            
-            return normalizedDate.includes(shortStr) || normalizedDate.includes(fullStr) || normalizedDate.includes(selectedDate) || normalizedDate.includes(selectedFr);
-          }
+
+        // 4. Short / Full month format check
+        const parts = activeSearchDate.split('-');
+        if (parts.length === 3) {
+          const day = parseInt(parts[2], 10);
+          const monthIndex = parseInt(parts[1], 10) - 1;
+          const monthsShort = [
+            'janv', 'févr', 'mars', 'avril', 'mai', 'juin',
+            'juil', 'août', 'sept', 'oct', 'nov', 'déc'
+          ];
+          const monthsFull = [
+            'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+            'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'
+          ];
+          const shortStr = `${day} ${monthsShort[monthIndex]}`.toLowerCase();
+          const fullStr = `${day} ${monthsFull[monthIndex]}`.toLowerCase();
+          
+          if (normalizedDate.includes(shortStr) || normalizedDate.includes(fullStr)) return true;
         }
+
         return false;
       };
 
@@ -337,7 +409,7 @@ export default function PassengerFlow({
     }
     return SEARCH_DRIVERS[0];
   });
-  const [paymentMethod, setPaymentMethod] = useState<'wave' | 'orange_money' | 'card'>('wave');
+  const [paymentMethod, setPaymentMethod] = useState<'wave' | 'orange_money' | 'card' | 'cash'>('wave');
   const [isPaying, setIsPaying] = useState(false);
   
   // Active viewed ticket (if opened from history)
@@ -418,145 +490,296 @@ export default function PassengerFlow({
   // Handle passenger register submit
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName.trim()) {
+    const cleanName = sanitizeInput(fullName.trim());
+    const cleanPhone = phone.trim();
+    const cleanReferral = referral ? sanitizeInput(referral.trim()) : '';
+
+    if (!cleanName) {
       setLoginError('Veuillez saisir votre nom complet');
       return;
     }
-    if (!phone.trim()) {
+    if (!cleanPhone) {
       setLoginError('Veuillez saisir votre numéro de téléphone');
       return;
     }
+    if (!validatePhone(cleanPhone)) {
+      setLoginError('Format de téléphone invalide. Utilisez un numéro sénégalais valide (ex: 771234567 ou +221771234567).');
+      return;
+    }
+    if (!password.trim()) {
+      setLoginError('Veuillez saisir un mot de passe');
+      return;
+    }
+
+    const secureHashedPassword = await hashPassword(password.trim());
 
     if (isSupabaseConfigured) {
       try {
         const { data: existingPassenger, error: checkError } = await supabase
           .from('passengers')
           .select('*')
-          .eq('phone', phone.trim());
+          .eq('phone', cleanPhone);
 
         if (checkError) {
           console.warn('Check existing passenger error:', checkError.message);
         }
 
         if (existingPassenger && existingPassenger.length > 0) {
-          const matched = existingPassenger[0];
-          setFullName(matched.name);
-          setPhone(matched.phone);
-          localStorage.setItem('dem_passenger_id', matched.id);
-          localStorage.setItem('dem_passenger_name', matched.name);
-          localStorage.setItem('dem_passenger_phone', matched.phone);
-          setLoginError('');
-          setScreen('home');
+          setLoginError('Ce numéro de téléphone est déjà associé à un compte. Veuillez vous connecter.');
           return;
         }
 
         const id = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        const { error } = await supabase
-          .from('passengers')
-          .insert([{
-            id,
-            name: fullName,
-            phone: phone,
-            referral: referral || null
-          }]);
-        if (error) {
-          console.warn('Error inserting passenger to Supabase:', error.message);
+        let passengerData: any = {
+          id,
+          name: cleanName,
+          phone: cleanPhone,
+          password: secureHashedPassword,
+          referral: cleanReferral || null
+        };
+
+        let attempts = 0;
+        let success = false;
+        let lastError: any = null;
+
+        while (attempts < 6 && !success) {
+          const { error } = await supabase
+            .from('passengers')
+            .insert([passengerData]);
+
+          if (!error) {
+            success = true;
+            break;
+          }
+
+          lastError = error;
+          console.warn(`Passenger insert attempt ${attempts} failed:`, error.message);
+
+          let missingColumn: string | null = null;
+          const matchSingleQuote = error.message.match(/column '([^']+)'/i) || error.message.match(/'([^']+)' column/i);
+          if (matchSingleQuote && matchSingleQuote[1]) {
+            missingColumn = matchSingleQuote[1];
+          } else if (error.message.toLowerCase().includes('column')) {
+            const words = error.message.replace(/['"]/g, '').split(/\s+/);
+            for (const key of Object.keys(passengerData)) {
+              if (words.includes(key)) {
+                missingColumn = key;
+                break;
+              }
+            }
+          }
+
+          if (missingColumn && passengerData[missingColumn] !== undefined) {
+            console.warn(`Removing missing column '${missingColumn}' from payload and retrying...`);
+            delete passengerData[missingColumn];
+          } else {
+            break;
+          }
+          attempts++;
         }
+
         localStorage.setItem('dem_passenger_id', id);
-        localStorage.setItem('dem_passenger_name', fullName);
-        localStorage.setItem('dem_passenger_phone', phone);
+        localStorage.setItem('dem_passenger_name', cleanName);
+        localStorage.setItem('dem_passenger_phone', cleanPhone);
+        localStorage.setItem('dem_passenger_password', secureHashedPassword);
       } catch (err: any) {
         console.warn('Failed to register passenger in Supabase (falling back to local):', err.message);
         const id = 'p_' + Date.now();
         localStorage.setItem('dem_passenger_id', id);
-        localStorage.setItem('dem_passenger_name', fullName);
-        localStorage.setItem('dem_passenger_phone', phone);
+        localStorage.setItem('dem_passenger_name', cleanName);
+        localStorage.setItem('dem_passenger_phone', cleanPhone);
+        localStorage.setItem('dem_passenger_password', secureHashedPassword);
       }
     } else {
       const id = 'p_' + Date.now();
       localStorage.setItem('dem_passenger_id', id);
-      localStorage.setItem('dem_passenger_name', fullName);
-      localStorage.setItem('dem_passenger_phone', phone);
+      localStorage.setItem('dem_passenger_name', cleanName);
+      localStorage.setItem('dem_passenger_phone', cleanPhone);
+      localStorage.setItem('dem_passenger_password', secureHashedPassword);
     }
     setLoginError('');
     setScreen('home');
   };
 
   // Handle passenger login submit
+  const [isAutoCreatingAccount, setIsAutoCreatingAccount] = useState(false);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginFullName.trim()) {
-      setLoginError('Veuillez saisir votre nom complet');
-      return;
-    }
-    if (!loginPhone.trim()) {
+    const cleanLoginPhone = loginPhone.trim();
+    if (!cleanLoginPhone) {
       setLoginError('Veuillez saisir votre numéro de téléphone');
       return;
     }
+    if (!validatePhone(cleanLoginPhone)) {
+      setLoginError('Format de téléphone invalide.');
+      return;
+    }
+    if (!loginPassword.trim()) {
+      setLoginError('Veuillez saisir votre mot de passe');
+      return;
+    }
+
     if (isSupabaseConfigured) {
       try {
         const { data, error } = await supabase
           .from('passengers')
           .select('*')
-          .eq('phone', loginPhone);
+          .eq('phone', cleanLoginPhone);
         
         if (error) {
           console.warn('Supabase passenger login query error (falling back to local):', error.message);
-          setFullName(loginFullName);
-          setPhone(loginPhone);
-          localStorage.setItem('dem_passenger_id', 'p_' + Date.now());
-          localStorage.setItem('dem_passenger_name', loginFullName);
-          localStorage.setItem('dem_passenger_phone', loginPhone);
-          setLoginError('');
-          setScreen('home');
-          return;
+          // Local fallback
+          const localPhone = localStorage.getItem('dem_passenger_phone');
+          const localPassword = localStorage.getItem('dem_passenger_password');
+          const localName = localStorage.getItem('dem_passenger_name') || 'Passager';
+          
+          const isMatch = localPassword ? await verifyPassword(loginPassword, localPassword) : false;
+          if (localPhone === cleanLoginPhone && isMatch) {
+            setFullName(localName);
+            setPhone(cleanLoginPhone);
+            setScreen('home');
+            return;
+          } else {
+            // Local auto-creation fallback with hashed password
+            const id = 'p_' + Date.now();
+            const defaultName = "Passager " + cleanLoginPhone.slice(-4);
+            const secureHashedPassword = await hashPassword(loginPassword);
+            setFullName(defaultName);
+            setPhone(cleanLoginPhone);
+            localStorage.setItem('dem_passenger_id', id);
+            localStorage.setItem('dem_passenger_name', defaultName);
+            localStorage.setItem('dem_passenger_phone', cleanLoginPhone);
+            localStorage.setItem('dem_passenger_password', secureHashedPassword);
+            alert("Aucun compte local existant. Un nouveau compte sécurisé a été automatiquement créé !");
+            setScreen('home');
+            return;
+          }
         }
  
         const matchedPassenger = data && data.length > 0 ? data[0] : null;
  
         if (matchedPassenger) {
+          if (matchedPassenger.password !== undefined && matchedPassenger.password !== null) {
+            const isMatch = await verifyPassword(loginPassword, matchedPassenger.password);
+            if (!isMatch) {
+              setLoginError('Mot de passe incorrect');
+              return;
+            }
+          }
           setFullName(matchedPassenger.name);
           setPhone(matchedPassenger.phone);
           localStorage.setItem('dem_passenger_id', matchedPassenger.id);
           localStorage.setItem('dem_passenger_name', matchedPassenger.name);
           localStorage.setItem('dem_passenger_phone', matchedPassenger.phone);
+          if (matchedPassenger.password) {
+            localStorage.setItem('dem_passenger_password', matchedPassenger.password);
+          }
         } else {
-          // Si le passager n'existe pas encore dans la DB, on le crée
-          const id = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+          // AUTO REGISTER PASSENGER ON SUPABASE!
+          setIsAutoCreatingAccount(true);
+          const id = 'p_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+          const defaultName = "Passager " + cleanLoginPhone.slice(-4);
+          const secureHashedPassword = await hashPassword(loginPassword);
+          const newPassenger = {
+            id,
+            name: defaultName,
+            phone: cleanLoginPhone,
+            password: secureHashedPassword,
+            referral: null
+          };
+
           const { error: insertError } = await supabase
             .from('passengers')
-            .insert([{
-              id,
-              name: loginFullName,
-              phone: loginPhone,
-              referral: null
-            }]);
+            .insert([newPassenger]);
+
+          setIsAutoCreatingAccount(false);
+
           if (insertError) {
-            console.warn('Auto-registration error on login:', insertError.message);
+            console.warn("Supabase passenger auto-registration failed:", insertError.message);
+            setLoginError("La création du compte a échoué: " + insertError.message);
+            return;
           }
-          setFullName(loginFullName);
-          setPhone(loginPhone);
+
+          setFullName(newPassenger.name);
+          setPhone(newPassenger.phone);
           localStorage.setItem('dem_passenger_id', id);
-          localStorage.setItem('dem_passenger_name', loginFullName);
-          localStorage.setItem('dem_passenger_phone', loginPhone);
+          localStorage.setItem('dem_passenger_name', newPassenger.name);
+          localStorage.setItem('dem_passenger_phone', newPassenger.phone);
+          localStorage.setItem('dem_passenger_password', newPassenger.password);
+          alert("Votre compte a été créé automatiquement avec succès sur Supabase ! Bienvenue.");
         }
       } catch (err: any) {
         console.warn('Unexpected passenger login error (falling back to local):', err.message);
-        setFullName(loginFullName);
-        setPhone(loginPhone);
-        localStorage.setItem('dem_passenger_id', 'p_' + Date.now());
-        localStorage.setItem('dem_passenger_name', loginFullName);
-        localStorage.setItem('dem_passenger_phone', loginPhone);
+        const localPhone = localStorage.getItem('dem_passenger_phone');
+        const localPassword = localStorage.getItem('dem_passenger_password');
+        const localName = localStorage.getItem('dem_passenger_name') || 'Passager';
+        
+        const isMatch = localPassword ? await verifyPassword(loginPassword, localPassword) : false;
+        if (localPhone === cleanLoginPhone && isMatch) {
+          setFullName(localName);
+          setPhone(cleanLoginPhone);
+          setScreen('home');
+          return;
+        } else {
+          // Local auto-creation fallback
+          const id = 'p_' + Date.now();
+          const defaultName = "Passager " + cleanLoginPhone.slice(-4);
+          const secureHashedPassword = await hashPassword(loginPassword);
+          setFullName(defaultName);
+          setPhone(cleanLoginPhone);
+          localStorage.setItem('dem_passenger_id', id);
+          localStorage.setItem('dem_passenger_name', defaultName);
+          localStorage.setItem('dem_passenger_phone', cleanLoginPhone);
+          localStorage.setItem('dem_passenger_password', secureHashedPassword);
+          alert("Nouveau compte créé automatiquement en mode local !");
+          setScreen('home');
+          return;
+        }
       }
     } else {
-      setFullName(loginFullName);
-      setPhone(loginPhone);
-      localStorage.setItem('dem_passenger_id', 'p_' + Date.now());
-      localStorage.setItem('dem_passenger_name', loginFullName);
-      localStorage.setItem('dem_passenger_phone', loginPhone);
+      const localPhone = localStorage.getItem('dem_passenger_phone');
+      const localPassword = localStorage.getItem('dem_passenger_password');
+      const localName = localStorage.getItem('dem_passenger_name') || 'Passager';
+      
+      const isMatch = localPassword ? await verifyPassword(loginPassword, localPassword) : false;
+      if (localPhone === cleanLoginPhone && isMatch) {
+        setFullName(localName);
+        setPhone(cleanLoginPhone);
+        localStorage.setItem('dem_passenger_id', localStorage.getItem('dem_passenger_id') || 'p_' + Date.now());
+      } else {
+        const id = 'p_' + Date.now();
+        const defaultName = "Passager " + cleanLoginPhone.slice(-4);
+        const secureHashedPassword = await hashPassword(loginPassword);
+        setFullName(defaultName);
+        setPhone(cleanLoginPhone);
+        localStorage.setItem('dem_passenger_id', id);
+        localStorage.setItem('dem_passenger_name', defaultName);
+        localStorage.setItem('dem_passenger_phone', cleanLoginPhone);
+        localStorage.setItem('dem_passenger_password', secureHashedPassword);
+        alert("Votre compte local a été créé automatiquement avec succès !");
+      }
     }
     setLoginError('');
     setScreen('home');
+  };
+
+  const handleLogout = () => {
+    setFullName('');
+    setPhone('');
+    setPassword('');
+    setReferral('');
+    setLoginPhone('');
+    setLoginFullName('');
+    setLoginPassword('');
+    
+    localStorage.removeItem('dem_passenger_id');
+    localStorage.removeItem('dem_passenger_name');
+    localStorage.removeItem('dem_passenger_phone');
+    localStorage.removeItem('dem_passenger_password');
+    
+    onBackToWelcome();
+    setScreen('login');
   };
 
   // Select driver from list to navigate to payment
@@ -779,6 +1002,25 @@ export default function PassengerFlow({
                   </div>
                 </div>
 
+                {/* Password */}
+                <div className="space-y-2">
+                  <label htmlFor="password" className="block font-sans font-semibold text-xs text-[#10204A] ml-1">
+                    Mot de passe
+                  </label>
+                  <div className="relative flex items-center bg-white border border-gray-200 focus-within:border-brand-blue focus-within:ring-1 focus-within:ring-brand-blue rounded-2xl transition-all duration-200">
+                    <span className="material-symbols-outlined absolute left-4 text-gray-400">lock</span>
+                    <input
+                      id="password"
+                      type="password"
+                      required
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-transparent border-none py-3.5 pl-12 pr-4 focus:outline-none text-sm text-gray-800 placeholder:text-gray-300"
+                    />
+                  </div>
+                </div>
+
                 {/* Referral (Optional) */}
                 <div className="space-y-2">
                   <label htmlFor="referral" className="block font-sans font-semibold text-xs text-[#10204A] ml-1">
@@ -885,25 +1127,6 @@ export default function PassengerFlow({
                   </div>
                 )}
 
-                {/* Full Name */}
-                <div className="space-y-2">
-                  <label htmlFor="loginFullName" className="block font-sans font-semibold text-xs text-[#10204A] ml-1">
-                    Nom Complet
-                  </label>
-                  <div className="relative flex items-center bg-white border border-gray-200 focus-within:border-brand-blue focus-within:ring-1 focus-within:ring-brand-blue rounded-2xl transition-all duration-200">
-                    <span className="material-symbols-outlined absolute left-4 text-gray-400">person</span>
-                    <input
-                      id="loginFullName"
-                      type="text"
-                      required
-                      value={loginFullName}
-                      onChange={(e) => setLoginFullName(e.target.value)}
-                      placeholder="Ex: Moussa Diop"
-                      className="w-full bg-transparent border-none py-3.5 pl-12 pr-4 focus:outline-none text-sm text-gray-800 placeholder:text-gray-300"
-                    />
-                  </div>
-                </div>
-
                 {/* Telephone */}
                 <div className="space-y-2">
                   <label htmlFor="loginPhone" className="block font-sans font-semibold text-xs text-[#10204A] ml-1">
@@ -923,6 +1146,25 @@ export default function PassengerFlow({
                         className="w-full bg-transparent border-none py-3.5 px-0 focus:outline-none text-sm text-gray-800 font-mono placeholder:text-gray-300"
                       />
                     </div>
+                  </div>
+                </div>
+
+                {/* Password */}
+                <div className="space-y-2">
+                  <label htmlFor="loginPassword" className="block font-sans font-semibold text-xs text-[#10204A] ml-1">
+                    Mot de passe
+                  </label>
+                  <div className="relative flex items-center bg-white border border-gray-200 focus-within:border-brand-blue focus-within:ring-1 focus-within:ring-brand-blue rounded-2xl transition-all duration-200">
+                    <span className="material-symbols-outlined absolute left-4 text-gray-400">lock</span>
+                    <input
+                      id="loginPassword"
+                      type="password"
+                      required
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full bg-transparent border-none py-3.5 pl-12 pr-4 focus:outline-none text-sm text-gray-800 placeholder:text-gray-300"
+                    />
                   </div>
                 </div>
 
@@ -1714,7 +1956,7 @@ export default function PassengerFlow({
                     {searchFrom} ➜ {searchTo}
                   </h1>
                   <p className="font-mono text-[10px] text-gray-500">
-                    {searchTab === 'today' ? "Aujourd'hui" : searchTab === 'tomorrow' ? 'Demain' : searchTab === 'after_tomorrow' ? 'Après-demain' : getFrenchDateLabel(selectedDate)}
+                    {activeSearchDateLabel}
                   </p>
                 </div>
               </div>
@@ -1735,7 +1977,7 @@ export default function PassengerFlow({
                     searchTab === 'today' ? 'bg-white text-brand-blue shadow-sm' : 'text-gray-500'
                   }`}
                 >
-                  Auj.
+                  {getFrenchDayLabel(calendarBaseDate)}
                 </button>
                 <button
                   onClick={() => setSearchTab('tomorrow')}
@@ -1743,7 +1985,7 @@ export default function PassengerFlow({
                     searchTab === 'tomorrow' ? 'bg-white text-brand-blue shadow-sm' : 'text-gray-500'
                   }`}
                 >
-                  Demain
+                  {getFrenchDayLabel(addDaysToISO(calendarBaseDate, 1))}
                 </button>
                 <button
                   onClick={() => setSearchTab('after_tomorrow')}
@@ -1751,7 +1993,7 @@ export default function PassengerFlow({
                     searchTab === 'after_tomorrow' ? 'bg-white text-brand-blue shadow-sm' : 'text-gray-500'
                   }`}
                 >
-                  Après-dem.
+                  {getFrenchDayLabel(addDaysToISO(calendarBaseDate, 2))}
                 </button>
               </div>
               
@@ -1759,13 +2001,13 @@ export default function PassengerFlow({
               <button
                 onClick={() => setIsCalendarOpen(true)}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-mono font-bold transition-all duration-200 cursor-pointer ${
-                  searchTab === 'custom'
+                  calendarBaseDate !== todayStr
                     ? 'bg-[#1B3D8A] text-white border-[#1B3D8A] shadow-sm'
                     : 'bg-white hover:bg-gray-50 text-[#1B3D8A] border-gray-200'
                 }`}
               >
                 <span className="material-symbols-outlined text-sm">calendar_month</span>
-                <span>{searchTab === 'custom' ? getFrenchDateLabel(selectedDate).split(' ').slice(0, 2).join(' ') : 'Calendrier'}</span>
+                <span>{calendarBaseDate === todayStr ? 'Calendrier' : getFrenchDateLabel(calendarBaseDate).split(' ').slice(0, 2).join(' ')}</span>
               </button>
             </div>
 
@@ -2278,6 +2520,25 @@ export default function PassengerFlow({
                     </div>
                   </label>
 
+                  {/* Cash option */}
+                  <label
+                    onClick={() => setPaymentMethod('cash')}
+                    className={`flex items-center justify-between p-3.5 bg-white border rounded-xl cursor-pointer transition-all duration-150 ${
+                      paymentMethod === 'cash' ? 'border-green-600 bg-green-50/40' : 'border-gray-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-600 rounded-lg flex items-center justify-center text-white shrink-0">
+                        <span className="material-symbols-outlined text-2xl font-bold">payments</span>
+                      </div>
+                      <div className="text-left">
+                        <p className="font-sans font-bold text-xs text-[#10204A]">Paiement en espèces (à bord)</p>
+                      </div>
+                    </div>
+                    <div className="w-5 h-5 rounded-full border border-gray-300 flex items-center justify-center">
+                      {paymentMethod === 'cash' && <span className="w-2.5 h-2.5 rounded-full bg-green-600" />}
+                    </div>
+                  </label>
 
                 </div>
               </section>
@@ -2678,7 +2939,7 @@ export default function PassengerFlow({
 
                 {/* Log Out button */}
                 <button
-                  onClick={onBackToWelcome}
+                  onClick={handleLogout}
                   className="w-full py-3 rounded-xl bg-red-50 text-red-600 border border-red-100 font-sans font-bold text-xs flex items-center justify-center gap-2 active:bg-red-100 transition-colors cursor-pointer mt-2"
                 >
                   <span className="material-symbols-outlined text-sm">logout</span>
@@ -2780,6 +3041,22 @@ export default function PassengerFlow({
                         <span className="material-symbols-outlined text-sm">payments</span>
                         Payer avec Wave
                       </a>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {viewedBooking.paymentMethod === 'cash' && (
+                <div className="mb-5 bg-green-50 border border-green-200 rounded-2xl p-4 text-green-800 shadow-sm">
+                  <div className="flex gap-3">
+                    <div className="w-9 h-9 shrink-0 rounded-full bg-green-100 flex items-center justify-center text-green-600">
+                      <span className="material-symbols-outlined font-bold text-lg">payments</span>
+                    </div>
+                    <div className="flex-grow text-left">
+                      <p className="font-space font-extrabold text-xs text-green-900">Paiement en espèces</p>
+                      <p className="font-sans text-[11px] text-green-700 mt-1 leading-relaxed">
+                        Le paiement se fera en espèces directement à bord du véhicule auprès de votre chauffeur lors de l'embarquement.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -3045,7 +3322,8 @@ export default function PassengerFlow({
                             type="button"
                             onClick={() => {
                               setSelectedDate(dateString);
-                              setSearchTab('custom');
+                              setCalendarBaseDate(dateString);
+                              setSearchTab('today');
                               setIsCalendarOpen(false);
                             }}
                             className={`aspect-square text-xs font-mono font-semibold rounded-full flex items-center justify-center transition-all cursor-pointer ${
@@ -3071,11 +3349,12 @@ export default function PassengerFlow({
                     type="button"
                     onClick={() => {
                       setSelectedDate(todayStr);
+                      setCalendarBaseDate(todayStr);
                       setSearchTab('today');
                       setIsCalendarOpen(false);
                     }}
                     className={`py-1.5 px-1 rounded-xl text-[10px] font-sans font-bold transition-all border cursor-pointer ${
-                      searchTab === 'today'
+                      searchTab === 'today' && calendarBaseDate === todayStr
                         ? 'bg-[#1B3D8A] text-white border-[#1B3D8A] shadow-sm'
                         : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-100'
                     }`}
@@ -3086,11 +3365,12 @@ export default function PassengerFlow({
                     type="button"
                     onClick={() => {
                       setSelectedDate(tomorrowStr);
+                      setCalendarBaseDate(todayStr);
                       setSearchTab('tomorrow');
                       setIsCalendarOpen(false);
                     }}
                     className={`py-1.5 px-1 rounded-xl text-[10px] font-sans font-bold transition-all border cursor-pointer ${
-                      searchTab === 'tomorrow'
+                      searchTab === 'tomorrow' && calendarBaseDate === todayStr
                         ? 'bg-[#1B3D8A] text-white border-[#1B3D8A] shadow-sm'
                         : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-100'
                     }`}
@@ -3101,11 +3381,12 @@ export default function PassengerFlow({
                     type="button"
                     onClick={() => {
                       setSelectedDate(afterTomorrowStr);
+                      setCalendarBaseDate(todayStr);
                       setSearchTab('after_tomorrow');
                       setIsCalendarOpen(false);
                     }}
                     className={`py-1.5 px-1 rounded-xl text-[10px] font-sans font-bold transition-all border cursor-pointer ${
-                      searchTab === 'after_tomorrow'
+                      searchTab === 'after_tomorrow' && calendarBaseDate === todayStr
                         ? 'bg-[#1B3D8A] text-white border-[#1B3D8A] shadow-sm'
                         : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-100'
                     }`}
