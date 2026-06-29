@@ -71,11 +71,11 @@ export default function PassengerFlow({
   const [scrollTop, setScrollTop] = useState(0);
 
   // Passenger Form State
-  const [fullName, setFullName] = useState(() => localStorage.getItem('dem_passenger_name') || 'Daouda Samb');
-  const [phone, setPhone] = useState(() => localStorage.getItem('dem_passenger_phone') || '772783150');
+  const [fullName, setFullName] = useState(() => localStorage.getItem('dem_passenger_name') || '');
+  const [phone, setPhone] = useState(() => localStorage.getItem('dem_passenger_phone') || '');
   const [referral, setReferral] = useState('');
-  const [loginPhone, setLoginPhone] = useState(() => localStorage.getItem('dem_passenger_phone') || '772783150');
-  const [loginFullName, setLoginFullName] = useState(() => localStorage.getItem('dem_passenger_name') || 'Daouda Samb');
+  const [loginPhone, setLoginPhone] = useState(() => localStorage.getItem('dem_passenger_phone') || '');
+  const [loginFullName, setLoginFullName] = useState(() => localStorage.getItem('dem_passenger_name') || '');
   const [loginError, setLoginError] = useState('');
 
   // Regular Booking Custom Pickup and Pricing State
@@ -439,7 +439,14 @@ export default function PassengerFlow({
         }
 
         if (existingPassenger && existingPassenger.length > 0) {
-          setLoginError('Vous avez déjà un compte');
+          const matched = existingPassenger[0];
+          setFullName(matched.name);
+          setPhone(matched.phone);
+          localStorage.setItem('dem_passenger_id', matched.id);
+          localStorage.setItem('dem_passenger_name', matched.name);
+          localStorage.setItem('dem_passenger_phone', matched.phone);
+          setLoginError('');
+          setScreen('home');
           return;
         }
 
@@ -2270,6 +2277,8 @@ export default function PassengerFlow({
                       {paymentMethod === 'wave' && <span className="w-2.5 h-2.5 rounded-full bg-[#1B3D8A]" />}
                     </div>
                   </label>
+
+
                 </div>
               </section>
 
@@ -2760,20 +2769,23 @@ export default function PassengerFlow({
                     <div className="flex-grow text-left">
                       <p className="font-space font-extrabold text-xs text-[#10204A]">Paiement par Wave</p>
                       <p className="font-sans text-[11px] text-gray-600 mt-1 leading-relaxed">
-                        Veuillez payer DEM niou_dem avec Wave en cliquant sur ce lien :
+                        Veuillez finaliser votre paiement DEM niou_dem via Wave :
                       </p>
                       <a
                         href="https://pay.wave.com/m/M_sn_f_tcYvA8qrtr/c/sn/"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-2 text-[#1B3D8A] hover:text-[#15316F] font-sans font-bold text-[11px] break-all underline block"
+                        className="mt-3 inline-flex items-center justify-center gap-2 w-full bg-[#1B3D8A] hover:bg-[#15316F] text-white font-space font-extrabold py-2.5 px-4 rounded-xl transition-all shadow-sm text-xs text-center"
                       >
-                        https://pay.wave.com/m/M_sn_f_tcYvA8qrtr/c/sn/
+                        <span className="material-symbols-outlined text-sm">payments</span>
+                        Payer avec Wave
                       </a>
                     </div>
                   </div>
                 </div>
               )}
+
+
 
               <div className="border-2 border-brand-blue/10 rounded-[32px] p-2">
                 

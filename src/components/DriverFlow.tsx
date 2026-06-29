@@ -34,17 +34,17 @@ export default function DriverFlow({
 }: DriverFlowProps) {
   // Register form state
   const [driverAvatar, setDriverAvatar] = useState(() => localStorage.getItem('dem_driver_avatar') || 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA');
-  const [driverName, setDriverName] = useState(() => localStorage.getItem('dem_driver_name') || 'Moussa Diop');
-  const [driverEmail, setDriverEmail] = useState(() => localStorage.getItem('dem_driver_email') || 'moussa.diop@ddd.sn');
-  const [driverPhone, setDriverPhone] = useState(() => localStorage.getItem('dem_driver_phone') || '77 452 11 00');
+  const [driverName, setDriverName] = useState(() => localStorage.getItem('dem_driver_name') || '');
+  const [driverEmail, setDriverEmail] = useState(() => localStorage.getItem('dem_driver_email') || '');
+  const [driverPhone, setDriverPhone] = useState(() => localStorage.getItem('dem_driver_phone') || '');
   const [licenseType, setDriverLicense] = useState(() => localStorage.getItem('dem_driver_license') || 'D');
   const [experienceYears, setExperience] = useState(() => localStorage.getItem('dem_driver_experience') || '8');
-  const [vehicleBrand, setVehicleBrand] = useState(() => localStorage.getItem('dem_driver_vehicle_brand') || 'Toyota Hiace');
-  const [vehiclePlate, setVehiclePlate] = useState(() => localStorage.getItem('dem_driver_vehicle_plate') || 'DK-4521-A');
-  const [vehicleSeats, setVehicleSeats] = useState(() => localStorage.getItem('dem_driver_vehicle_seats') || '15');
+  const [vehicleBrand, setVehicleBrand] = useState(() => localStorage.getItem('dem_driver_vehicle_brand') || '');
+  const [vehiclePlate, setVehiclePlate] = useState(() => localStorage.getItem('dem_driver_vehicle_plate') || '');
+  const [vehicleSeats, setVehicleSeats] = useState(() => localStorage.getItem('dem_driver_vehicle_seats') || '');
   const [vehicleImage, setVehicleImage] = useState(() => localStorage.getItem('dem_driver_vehicle_image') || 'https://lh3.googleusercontent.com/aida-public/AB6AXuD9TVVPgjd2IX2DGV2fbpVShVAXHyQKmBT0274-gR8kDxcUcUEWkmAM1Lviuz-b7Zr1YB6_neSlzXKjitOvKH66k7xa1X_6GBUhMSQG3Jc5Fsc0QpUEZ49OQeG91yXWM67A5cMHOp47Y90Th0N0A1YfMMf2lLH8PdMYChzMD_ol2JKv1_WTgQOJSL70osXCK9JkiwiJFL4Ijz7XipZWtpedd_1TJexJyyJzB40obG9NVdLUA8dZ4JH4_4KZVjh0vqx248QNuCcEK0HA');
-  const [loginDriverPhone, setLoginDriverPhone] = useState(() => localStorage.getItem('dem_driver_phone') || '77 452 11 00');
-  const [loginDriverName, setLoginDriverName] = useState(() => localStorage.getItem('dem_driver_name') || 'Moussa Diop');
+  const [loginDriverPhone, setLoginDriverPhone] = useState(() => localStorage.getItem('dem_driver_phone') || '');
+  const [loginDriverName, setLoginDriverName] = useState(() => localStorage.getItem('dem_driver_name') || '');
   const [driverLoginError, setDriverLoginError] = useState('');
 
   // Interactivity States
@@ -519,7 +519,25 @@ export default function DriverFlow({
         }
 
         if (existingDriver && existingDriver.length > 0) {
-          setDriverLoginError('Vous avez déjà un compte');
+          const matchedDriver = existingDriver[0];
+          setDriverName(matchedDriver.name);
+          setDriverPhone(matchedDriver.phone);
+          if (matchedDriver.avatar) setDriverAvatar(matchedDriver.avatar);
+          if (matchedDriver.vehicle_name) setVehicleBrand(matchedDriver.vehicle_name);
+          if (matchedDriver.vehicle_plate) setVehiclePlate(matchedDriver.vehicle_plate);
+          if (matchedDriver.seats_available) setVehicleSeats(String(matchedDriver.seats_available));
+          setIsOnline(!!matchedDriver.is_online);
+
+          localStorage.setItem('dem_driver_id', matchedDriver.id);
+          localStorage.setItem('dem_driver_name', matchedDriver.name);
+          localStorage.setItem('dem_driver_phone', matchedDriver.phone);
+          if (matchedDriver.avatar) localStorage.setItem('dem_driver_avatar', matchedDriver.avatar);
+          if (matchedDriver.vehicle_name) localStorage.setItem('dem_driver_vehicle_brand', matchedDriver.vehicle_name);
+          if (matchedDriver.vehicle_plate) localStorage.setItem('dem_driver_vehicle_plate', matchedDriver.vehicle_plate);
+          if (matchedDriver.seats_available) localStorage.setItem('dem_driver_vehicle_seats', String(matchedDriver.seats_available));
+
+          setDriverLoginError('');
+          setScreen('portal');
           return;
         }
 
@@ -527,11 +545,11 @@ export default function DriverFlow({
         const driverData: any = {
           id,
           name: driverName,
-          avatar: driverAvatar,
+          avatar: driverAvatar || 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA',
           rating: 4.8,
           trips_count: 0,
-          vehicle_name: vehicleBrand,
-          vehicle_plate: vehiclePlate,
+          vehicle_name: vehicleBrand || 'Toyota Hiace',
+          vehicle_plate: vehiclePlate || 'DK-4521-A',
           departure_time: '08:00',
           terminus: 'Tivaouane',
           seats_available: parseInt(vehicleSeats) || 15,
@@ -671,11 +689,11 @@ export default function DriverFlow({
           const driverData: any = {
             id,
             name: loginDriverName,
-            avatar: driverAvatar,
+            avatar: driverAvatar || 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsMI9DoKFAVDDaoqwh1khlHQ8NPiAYTt8guT3fAZoykrOJuaQxfbEFKQQN82sOWKLoD2TTgVMLpa6g-_d8ltwSIMbakMQ9JddCiU1QUAOOeq15kHzgF216HhzcCcGPY4FNL9mT40Rj4k8kcf-tK-kdiabt4XgkKX2OBv0G58L25Yw4m2TVUb_tuD4PxrvMStAAmCdQF6LkoMA0vtf8dt2fAqohs52vsdbcvpI1JL9NQnRgpfPlHS22Lo48tL36M1uYn5buDUFpL5KA',
             rating: 4.8,
             trips_count: 12,
-            vehicle_name: vehicleBrand,
-            vehicle_plate: vehiclePlate,
+            vehicle_name: vehicleBrand || 'Toyota Hiace',
+            vehicle_plate: vehiclePlate || 'DK-4521-A',
             departure_time: '08:00',
             terminus: 'Tivaouane',
             seats_available: parseInt(vehicleSeats) || 15,
