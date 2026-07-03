@@ -74,8 +74,12 @@ create table if not exists public.bookings (
   vehicle_name text,
   vehicle_plate text,
   pickup_address text,
+  seats_count integer default 1,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- IMPORTANT: Si votre table bookings existe déjà sur Supabase, exécutez cette requête SQL dans votre éditeur SQL Supabase :
+-- alter table public.bookings add column if not exists seats_count integer default 1;
 
 alter table public.bookings enable row level security;
 create policy "Allow public read" on public.bookings for select using (true);
@@ -133,3 +137,56 @@ create policy "Allow public read" on public.passengers for select using (true);
 create policy "Allow public insert" on public.passengers for insert with check (true);
 create policy "Allow public update" on public.passengers for update using (true);
 `;
+
+/**
+ * Appel des Supabase Edge Functions sécurisées pour remplacer les opérations sensibles en front-end
+ */
+
+export async function registerPassengerEdge(name: string, phone: string, password: string) {
+  const { data, error } = await supabase.functions.invoke('register-passenger', {
+    body: { name, phone, password }
+  });
+  if (error) throw new Error(error.message || JSON.stringify(error));
+  return data;
+}
+
+export async function loginPassengerEdge(phone: string, password: string) {
+  const { data, error } = await supabase.functions.invoke('login-passenger', {
+    body: { phone, password }
+  });
+  if (error) throw new Error(error.message || JSON.stringify(error));
+  return data; // { passenger: {...} }
+}
+
+export async function registerDriverEdge(driverData: any) {
+  const { data, error } = await supabase.functions.invoke('register-driver', {
+    body: driverData
+  });
+  if (error) throw new Error(error.message || JSON.stringify(error));
+  return data;
+}
+
+export async function loginDriverEdge(phone: string, password: string) {
+  const { data, error } = await supabase.functions.invoke('login-driver', {
+    body: { phone, password }
+  });
+  if (error) throw new Error(error.message || JSON.stringify(error));
+  return data; // { driver: {...} }
+}
+
+export async function createBookingEdge(bookingData: any, tripId: string, seatsCount: number, isDriverTrip: boolean) {
+  const { data, error } = await supabase.functions.invoke('create-booking', {
+    body: { bookingData, tripId, seatsCount, isDriverTrip }
+  });
+  if (error) throw new Error(error.message || JSON.stringify(error));
+  return data;
+}
+
+export async function updateTripStatusEdge(tripId: string, driverId: string, newStatus: string) {
+  const { data, error } = await supabase.functions.invoke('update-trip-status', {
+    body: { trip_id: tripId, driver_id: driverId, new_status: newStatus }
+  });
+  if (error) throw new Error(error.message || JSON.stringify(error));
+  return data;
+}
+

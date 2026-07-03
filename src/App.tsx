@@ -20,7 +20,7 @@ export default function App() {
   const [driverScreen, setDriverScreen] = useState<AppState['driverScreen']>('login');
 
   // Load Bookings from Supabase
-  const [bookings, setBookings] = useState<PassengerBooking[]>([]);
+  const [bookings, setBookings] = useState<PassengerBooking[]>(INITIAL_BOOKINGS);
 
   // Load Bookings from Supabase if configured
   useEffect(() => {
@@ -33,24 +33,34 @@ export default function App() {
           if (error) {
             console.warn("Supabase load warning (table might not exist yet):", error.message);
           } else if (data && data.length > 0) {
-            const mapped: PassengerBooking[] = data.map((b: any) => ({
-              id: b.id,
-              reference: b.reference,
-              from: b.from,
-              to: b.to,
-              date: b.date,
-              time: b.time,
-              passengerName: b.passenger_name,
-              phone: b.phone,
-              status: b.status,
-              price: Number(b.price),
-              driverName: b.driver_name,
-              driverAvatar: b.driver_avatar,
-              driverPhone: b.driver_phone,
-              vehicleName: b.vehicle_name,
-              vehiclePlate: b.vehicle_plate,
-              pickupAddress: b.pickup_address,
-            }));
+            const mapped: PassengerBooking[] = data.map((b: any) => {
+              const rawAddress = b.pickup_address || '';
+              const match = rawAddress.match(/\[Places:\s*(\d+)\]/);
+              const seatsCount = b.seats_count !== undefined && b.seats_count !== null 
+                ? Number(b.seats_count) 
+                : (match ? parseInt(match[1], 10) : undefined);
+              const cleanAddress = rawAddress.replace(/\s*\[Places:\s*\d+\]/, '');
+
+              return {
+                id: b.id,
+                reference: b.reference,
+                from: b.from,
+                to: b.to,
+                date: b.date,
+                time: b.time,
+                passengerName: b.passenger_name,
+                phone: b.phone,
+                status: b.status,
+                price: Number(b.price),
+                driverName: b.driver_name,
+                driverAvatar: b.driver_avatar,
+                driverPhone: b.driver_phone,
+                vehicleName: b.vehicle_name,
+                vehiclePlate: b.vehicle_plate,
+                pickupAddress: cleanAddress,
+                seatsCount: seatsCount
+              };
+            });
             setBookings(mapped);
           } else {
             setBookings([]);
@@ -71,7 +81,7 @@ export default function App() {
     setBookings(prev => [newBooking, ...prev]);
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('bookings').insert([{
+        const { error } = await supabase.from('bookings').insert([{
           id: newBooking.id,
           reference: newBooking.reference,
           from: newBooking.from,
@@ -88,7 +98,11 @@ export default function App() {
           vehicle_name: newBooking.vehicleName,
           vehicle_plate: newBooking.vehiclePlate,
           pickup_address: newBooking.pickupAddress,
+          seats_count: newBooking.seatsCount || 1,
         }]);
+        if (error) {
+          console.error("Booking insert error from Supabase:", error.message);
+        }
       } catch (err: any) {
         console.warn("Booking insert warning:", err?.message || err);
       }
@@ -99,7 +113,10 @@ export default function App() {
     setBookings(prev => prev.filter(b => b.id !== id));
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('bookings').delete().eq('id', id);
+        const { error } = await supabase.from('bookings').delete().eq('id', id);
+        if (error) {
+          console.error("Booking delete error from Supabase:", error.message);
+        }
       } catch (err: any) {
         console.warn("Booking delete warning:", err?.message || err);
       }
@@ -107,12 +124,25 @@ export default function App() {
   };
 
   const handleUpdateBookingStatus = async (id: string, nextStatus: 'active' | 'completed' | 'cancelled' | 'pending' | 'accepted' | 'refused') => {
-    setBookings(prev => prev.map(b => b.id === id ? { ...b, status: nextStatus } : b));
+    // Save current state for rollback
+    let previousBookings: PassengerBooking[] = [];
+    setBookings(prev => {
+      previousBookings = prev;
+      return prev.map(b => b.id === id ? { ...b, status: nextStatus } : b);
+    });
+
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('bookings').update({ status: nextStatus }).eq('id', id);
+        const { error } = await supabase.from('bookings').update({ status: nextStatus }).eq('id', id);
+        if (error) {
+          console.error("Booking update status error from Supabase:", error.message);
+          // Rollback local state if database update failed
+          setBookings(previousBookings);
+          alert(`Erreur lors de la mise à jour de la réservation : ${error.message}`);
+        }
       } catch (err: any) {
         console.warn("Booking update status warning:", err?.message || err);
+        setBookings(previousBookings);
       }
     }
   };

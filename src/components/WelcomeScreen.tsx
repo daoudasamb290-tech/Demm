@@ -47,7 +47,7 @@ export default function WelcomeScreen({ onSelectRole }: WelcomeScreenProps) {
             <div className="w-32 h-32 flex items-center justify-center rounded-full bg-white/5 backdrop-blur p-1">
               <img
                 src="/src/assets/images/log.png"
-                alt="DEM Transport Logo"
+                alt="DEM niou_dem Logo"
                 referrerPolicy="no-referrer"
                 className="w-full h-full object-contain rounded-full"
               />
@@ -58,7 +58,7 @@ export default function WelcomeScreen({ onSelectRole }: WelcomeScreenProps) {
 
           <div className="space-y-3">
             <h1 className="font-space text-3xl font-extrabold tracking-tight">
-              DEM <span className="text-brand-orange">Transport</span>
+              DEM <span className="text-brand-orange">niou_dem</span>
             </h1>
             <p className="font-sans text-lg text-white/80 max-w-[290px] mx-auto leading-snug px-2">
               Voyagez entre les villes du Sénégal, en toute simplicité.
@@ -107,7 +107,7 @@ export default function WelcomeScreen({ onSelectRole }: WelcomeScreenProps) {
         {/* Legal text */}
         <div className="text-center pt-2">
           <p className="font-mono text-[10px] text-white/40">
-            © 2026 DEM Transport. Tous droits réservés.
+            © 2026 DEM niou_dem. Tous droits réservés.
           </p>
         </div>
       </div>

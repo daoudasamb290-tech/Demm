@@ -21,6 +21,7 @@ export interface PassengerBooking {
   vehiclePlate: string;
   pickupAddress: string;
   paymentMethod?: 'wave' | 'orange_money' | 'card';
+  seatsCount?: number;
 }
 
 export interface DriverTrip {

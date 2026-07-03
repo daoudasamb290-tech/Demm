@@ -123,6 +123,34 @@ export default function DriverFlow({
     }
   }, []);
 
+  // Custom states for iframe-safe notifications and confirmation modal
+  const [pendingAction, setPendingAction] = useState<{
+    bookingId: string;
+    action: 'accepted' | 'refused';
+    passengerName: string;
+    seatsCount: number;
+  } | null>(null);
+
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [manualCode, setManualCode] = useState("");
+  const [selectedScannerBooking, setSelectedScannerBooking] = useState<any | null>(null);
+
+  const [isInstallGuideOpen, setIsInstallGuideOpen] = useState(false);
+  const [installTab, setInstallTab] = useState<'android' | 'ios'>('android');
+
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+    setToast({ message, type });
+  };
+
   // Sound Notification logic for incoming bookings
   const seenBookingsRef = useRef<Set<string>>(new Set());
   const isFirstLoadRef = useRef(true);
@@ -1623,14 +1651,14 @@ export default function DriverFlow({
 
                 <div className="space-y-3">
                   {upcomingTrips.length > 0 ? (
-                    upcomingTrips.map((trip) => {
+                    upcomingTrips.map((trip, idx) => {
                       const dateParts = trip.date.split(' ');
                       const day = dateParts[0] || '24';
                       const month = dateParts[1] ? dateParts[1].toUpperCase() : 'JUIN';
 
                       return (
                         <div
-                          key={trip.id}
+                          key={`${trip.id}-${idx}`}
                           onClick={() => handleOpenEditModal(trip)}
                           className="bg-white rounded-2xl p-4 flex items-center gap-4 border border-gray-100 shadow-sm cursor-pointer hover:border-[#3d5ba9]/30 active:scale-98 transition-all text-left"
                         >
@@ -1659,23 +1687,17 @@ export default function DriverFlow({
               </section>
 
               {/* Quick Actions bento grid */}
-              <section className="grid grid-cols-2 gap-4">
+              <section className="grid grid-cols-1">
                 <div
-                  onClick={() => alert("Scanner de ticket QR activé ! Prêt à valider les passagers.")}
-                  className="bg-gray-100 rounded-2xl p-4 flex flex-col gap-2 hover:bg-gray-200 transition-colors cursor-pointer text-left"
+                  onClick={() => setIsScannerOpen(true)}
+                  className="bg-gray-100 rounded-2xl p-4 flex items-center justify-between hover:bg-gray-200 transition-all cursor-pointer text-left shadow-sm border border-gray-150/50"
                 >
-                  <span className="material-symbols-outlined text-[#3d5ba9] text-xl font-bold">qr_code_scanner</span>
-                  <span className="font-space font-bold text-xs text-gray-800">Scanner Ticket</span>
+                  <div className="flex items-center gap-3">
+                    <span className="material-symbols-outlined text-[#3d5ba9] text-xl font-bold bg-white p-2 rounded-xl shadow-sm">qr_code_scanner</span>
+                    <span className="font-space font-bold text-xs text-gray-800">Scanner Ticket</span>
+                  </div>
+                  <span className="material-symbols-outlined text-gray-400 text-sm">chevron_right</span>
                 </div>
-                <a
-                  href="https://wa.me/221772783150"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="bg-gray-100 rounded-2xl p-4 flex flex-col gap-2 hover:bg-gray-200 transition-colors cursor-pointer text-left block"
-                >
-                  <span className="material-symbols-outlined text-[#3d5ba9] text-xl font-bold">support_agent</span>
-                  <span className="font-space font-bold text-xs text-gray-800">Assistance</span>
-                </a>
               </section>
             </main>
 
@@ -1748,7 +1770,11 @@ export default function DriverFlow({
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <button className="relative p-1.5 rounded-full hover:bg-white/10 transition-colors">
+                  <button 
+                    onClick={() => setIsInstallGuideOpen(true)}
+                    className="relative p-1.5 rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+                    id="driver-install-app-btn"
+                  >
                     <span className="material-symbols-outlined text-lg">download</span>
                   </button>
                   <button className="relative p-1.5 rounded-full hover:bg-white/10 transition-colors">
@@ -1844,14 +1870,14 @@ export default function DriverFlow({
 
                   {myBookings.filter(b => b.status === 'pending').length > 0 ? (
                     <div className="space-y-3 mt-2">
-                      {myBookings.filter(b => b.status === 'pending').map((b) => (
+                      {myBookings.filter(b => b.status === 'pending').map((b, idx) => (
                         <div
-                          key={b.id}
+                          key={`${b.id}-${idx}`}
                           className="bg-white rounded-2xl p-4 border border-amber-100 shadow-sm text-left space-y-3 relative overflow-hidden"
                         >
                           <div className="absolute top-0 right-0 bg-amber-50 text-amber-700 px-3 py-1 rounded-bl-xl text-[9px] font-bold font-mono uppercase tracking-wider flex items-center gap-1 border-l border-b border-amber-100">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                            Nouveau
+                            Nouveau • {b.seatsCount || 1} {(b.seatsCount || 1) > 1 ? 'PLACES' : 'PLACE'}
                           </div>
 
                           {/* Route and Price */}
@@ -1883,10 +1909,24 @@ export default function DriverFlow({
 
                           {/* Passenger info */}
                           <div className="space-y-1.5 border-t border-b border-gray-100 py-2.5 text-xs text-gray-600">
-                            <div className="flex items-center gap-2">
-                              <span className="material-symbols-outlined text-sm text-gray-400">person</span>
-                              <span className="font-bold text-gray-800">{b.passengerName}</span>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="material-symbols-outlined text-sm text-gray-400">person</span>
+                                <span className="font-bold text-gray-800">{b.passengerName}</span>
+                              </div>
+                              <span className="bg-orange-50 text-brand-orange text-[10px] font-space font-bold px-2 py-0.5 rounded-lg border border-orange-100">
+                                {b.seatsCount || 1} {(b.seatsCount || 1) > 1 ? 'places' : 'place'}
+                              </span>
                             </div>
+                            
+                            {/* Prominent seats indicator */}
+                            <div className="flex items-center gap-2 bg-orange-50/60 p-2 rounded-xl border border-orange-100/50 my-1">
+                              <span className="material-symbols-outlined text-sm text-brand-orange">event_seat</span>
+                              <span className="text-gray-700 leading-tight text-xs font-semibold">
+                                Places demandées : <strong className="text-brand-orange font-bold text-sm">{b.seatsCount || 1}</strong>
+                              </span>
+                            </div>
+
                             <div className="flex items-center gap-2">
                               <span className="material-symbols-outlined text-sm text-gray-400">phone</span>
                               <span className="font-mono text-gray-400 tracking-wider flex items-center gap-1.5">
@@ -1908,8 +1948,12 @@ export default function DriverFlow({
                           <div className="grid grid-cols-2 gap-2.5 pt-1">
                             <button
                               onClick={() => {
-                                onUpdateBookingStatus(b.id, 'refused');
-                                alert("Réservation refusée avec succès.");
+                                setPendingAction({
+                                  bookingId: b.id,
+                                  action: 'refused',
+                                  passengerName: b.passengerName || 'Passager',
+                                  seatsCount: b.seatsCount || 1
+                                });
                               }}
                               className="border border-red-200 hover:bg-red-50 text-red-600 font-space font-bold text-[11px] py-2.5 rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-1 cursor-pointer"
                             >
@@ -1918,13 +1962,17 @@ export default function DriverFlow({
                             </button>
                             <button
                               onClick={() => {
-                                onUpdateBookingStatus(b.id, 'accepted');
-                                alert("Réservation acceptée avec succès ! Le passager en est notifié.");
+                                setPendingAction({
+                                  bookingId: b.id,
+                                  action: 'accepted',
+                                  passengerName: b.passengerName || 'Passager',
+                                  seatsCount: b.seatsCount || 1
+                                });
                               }}
                               className="bg-green-600 hover:bg-green-700 text-white font-space font-bold text-[11px] py-2.5 rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-1 cursor-pointer shadow-sm"
                             >
                               <span className="material-symbols-outlined text-sm">check</span>
-                              <span>Accepter</span>
+                              <span>Accepter ({b.seatsCount || 1} pl.)</span>
                             </button>
                           </div>
                         </div>
@@ -1964,9 +2012,9 @@ export default function DriverFlow({
 
                     {myBookings.filter(b => b.status === 'accepted' || b.status === 'active').length > 0 ? (
                       <div className="space-y-3">
-                        {myBookings.filter(b => b.status === 'accepted' || b.status === 'active').map((b) => (
+                        {myBookings.filter(b => b.status === 'accepted' || b.status === 'active').map((b, idx) => (
                           <div
-                            key={b.id}
+                            key={`${b.id}-${idx}`}
                             className="bg-white rounded-2xl p-4 border border-green-100 shadow-sm text-left space-y-2 relative"
                           >
                             <div className="flex justify-between items-start">
@@ -1989,15 +2037,20 @@ export default function DriverFlow({
                               </div>
                             </div>
 
-                            <div className="bg-gray-50 p-2.5 rounded-xl space-y-1 text-[10px] text-gray-600">
-                              <p className="flex items-center gap-1">
-                                <span className="material-symbols-outlined text-xs">phone</span>
-                                <a href={`tel:${b.phone}`} className="font-mono font-bold text-[#1B3D8A] hover:underline">{b.phone}</a>
-                              </p>
-                              <p className="text-gray-700 leading-tight">
-                                <strong className="text-gray-900">Adresse:</strong> {b.pickupAddress}
-                              </p>
-                            </div>
+                             <div className="bg-gray-50 p-2.5 rounded-xl space-y-1 text-[10px] text-gray-600">
+                               <div className="flex items-center justify-between">
+                                 <p className="flex items-center gap-1">
+                                   <span className="material-symbols-outlined text-xs">phone</span>
+                                   <a href={`tel:${b.phone}`} className="font-mono font-bold text-[#1B3D8A] hover:underline">{b.phone}</a>
+                                 </p>
+                                 <span className="bg-green-100 text-green-800 px-2 py-0.5 rounded font-mono text-[9px] font-bold">
+                                   {b.seatsCount || 1} {(b.seatsCount || 1) > 1 ? 'places' : 'place'}
+                                 </span>
+                               </div>
+                               <p className="text-gray-700 leading-tight">
+                                 <strong className="text-gray-900">Adresse:</strong> {b.pickupAddress}
+                               </p>
+                             </div>
 
                             <button
                               onClick={() => {
@@ -2028,14 +2081,14 @@ export default function DriverFlow({
 
                   {upcomingTrips.length > 0 ? (
                     <div className="space-y-3">
-                      {upcomingTrips.map((trip) => {
+                      {upcomingTrips.map((trip, idx) => {
                         const dateParts = trip.date.split(' ');
                         const day = dateParts[0] || '24';
                         const month = dateParts[1] ? dateParts[1].toUpperCase() : 'JUIN';
 
                         return (
                           <div
-                            key={trip.id}
+                            key={`${trip.id}-${idx}`}
                             onClick={() => handleOpenEditModal(trip)}
                             className="bg-white rounded-2xl p-4 flex items-center gap-4 border border-gray-100 shadow-sm cursor-pointer hover:border-[#3d5ba9]/30 active:scale-98 transition-all text-left"
                           >
@@ -2083,9 +2136,9 @@ export default function DriverFlow({
 
                     {myBookings.filter(b => b.status === 'completed').length > 0 ? (
                       <div className="space-y-3">
-                        {myBookings.filter(b => b.status === 'completed').map((b) => (
+                        {myBookings.filter(b => b.status === 'completed').map((b, idx) => (
                           <div
-                            key={b.id}
+                            key={`${b.id}-${idx}`}
                             className="bg-white/70 rounded-2xl p-4 border border-gray-150 shadow-xs text-left space-y-1.5 opacity-90"
                           >
                             <div className="flex justify-between items-center">
@@ -2120,14 +2173,14 @@ export default function DriverFlow({
 
                   {completedTrips.length > 0 ? (
                     <div className="space-y-3">
-                      {completedTrips.map((trip) => {
+                      {completedTrips.map((trip, idx) => {
                         const dateParts = trip.date.split(' ');
                         const day = dateParts[0] || '24';
                         const month = dateParts[1] ? dateParts[1].toUpperCase() : 'JUIN';
 
                         return (
                           <div
-                            key={trip.id}
+                            key={`${trip.id}-${idx}`}
                             className="bg-white/75 rounded-2xl p-4 flex items-center gap-4 border border-gray-100 shadow-xs text-left opacity-90"
                           >
                             <div className="w-11 h-11 bg-green-50 rounded-xl flex flex-col items-center justify-center text-green-600 border border-green-100 shrink-0">
@@ -2527,6 +2580,7 @@ export default function DriverFlow({
       <AnimatePresence>
         {isCreateModalOpen && (
           <motion.div
+            key="create-trip-modal-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -2690,6 +2744,7 @@ export default function DriverFlow({
       <AnimatePresence>
         {selectedTripForEdit && (
           <motion.div
+            key="edit-trip-modal-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -2836,6 +2891,7 @@ export default function DriverFlow({
       <AnimatePresence>
         {isEditProfileOpen && (
           <motion.div
+            key="edit-profile-modal-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -3172,6 +3228,517 @@ export default function DriverFlow({
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Dynamic inline Confirmation Modal (iframe safe) */}
+      <AnimatePresence>
+        {pendingAction && (
+          <motion.div
+            key="pending-action-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 bg-[#10204A]/60 backdrop-blur-sm flex items-center justify-center p-5"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 15 }}
+              className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-xl border border-gray-100 flex flex-col"
+            >
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 ${
+                pendingAction.action === 'accepted' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'
+              }`}>
+                <span className="material-symbols-outlined font-bold text-2xl">
+                  {pendingAction.action === 'accepted' ? 'check_circle' : 'cancel'}
+                </span>
+              </div>
+
+              <h3 className="font-space font-bold text-[#10204A] text-base mb-2">
+                {pendingAction.action === 'accepted' ? 'Accepter la réservation ?' : 'Refuser la réservation ?'}
+              </h3>
+              
+              <p className="text-gray-500 text-xs leading-relaxed mb-6">
+                Voulez-vous {pendingAction.action === 'accepted' ? 'accepter' : 'refuser'} la demande de réservation de <strong>{pendingAction.seatsCount} place(s)</strong> pour le passager <strong>{pendingAction.passengerName}</strong> ?
+              </p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setPendingAction(null)}
+                  className="py-3 rounded-xl bg-gray-50 text-gray-500 font-space font-bold text-xs text-center border border-gray-150 hover:bg-gray-100 active:scale-98 transition-all cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onUpdateBookingStatus(pendingAction.bookingId, pendingAction.action);
+                    if (pendingAction.action === 'accepted') {
+                      showToast(`Réservation de ${pendingAction.passengerName} acceptée avec succès !`, 'success');
+                    } else {
+                      showToast(`Réservation de ${pendingAction.passengerName} refusée.`, 'info');
+                    }
+                    setPendingAction(null);
+                  }}
+                  className={`py-3 rounded-xl text-white font-space font-bold text-xs text-center active:scale-98 transition-all shadow-md cursor-pointer ${
+                    pendingAction.action === 'accepted' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'
+                  }`}
+                >
+                  Confirmer
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating WhatsApp Assistance Button (iframe safe & responsive) */}
+      {currentScreen !== 'login' && currentScreen !== 'register' && (
+        <motion.a
+          href="https://wa.me/221772783150?text=Bonjour%20Assistance%20DEM%20niou_dem%2C%20je%20suis%20un%20chauffeur%20partenaire%20et%20j'ai%20besoin%20d'aide."
+          target="_blank"
+          rel="noopener noreferrer"
+          initial={{ scale: 0, opacity: 0, y: 10 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          className="absolute right-5 bottom-24 z-40 w-12 h-12 bg-green-500 hover:bg-green-600 text-white rounded-full shadow-lg flex items-center justify-center cursor-pointer transition-colors border-2 border-white"
+          title="Assistance WhatsApp"
+        >
+          <svg className="w-6 h-6 fill-current" viewBox="0 0 24 24">
+            <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.513 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.724-1.457L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.725 1.45 5.515 0 10.002-4.484 10.005-9.998.002-2.67-1.037-5.18-2.92-7.065C16.57 1.654 14.06 1.01 11.39 1.01c-5.52 0-10.007 4.486-10.01 10.002-.001 1.74.453 3.442 1.316 4.935L1.648 22.1l6.327-1.66c1.474.805 3.014 1.229 4.672 1.229zM17.15 15.3l-1.47-.735c-.265-.13-.454-.197-.648.093l-.862 1.102c-.194.242-.388.273-.652.14-.265-.13-1.12-.413-2.133-1.314-.788-.701-1.32-1.568-1.474-1.833-.155-.265-.016-.407.117-.54l.4-.46c.13-.156.176-.265.265-.443.088-.178.044-.332-.022-.465l-.648-1.56c-.194-.466-.395-.397-.54-.407l-.464-.01c-.16 0-.42.06-.64.3a2.91 2.91 0 0 0-.91 2.16c0 1.275.928 2.508 1.056 2.68.128.175 1.828 2.79 4.43 3.913.62.267 1.104.427 1.48.547.623.197 1.19.17 1.637.102.498-.075 1.53-.625 1.745-1.196.215-.572.215-1.064.15-1.164c-.064-.1-.237-.16-.5-.29z" />
+          </svg>
+        </motion.a>
+      )}
+
+      {/* Dynamic Toast System */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key="toast-container"
+            initial={{ opacity: 0, y: -40 }}
+            animate={{ opacity: 1, y: 16 }}
+            exit={{ opacity: 0, y: -40 }}
+            className="absolute top-0 left-4 right-4 z-50 flex justify-center pointer-events-none"
+          >
+            <div className={`px-4 py-3 rounded-2xl shadow-lg border text-xs font-semibold flex items-center gap-2 max-w-xs ${
+              toast.type === 'success' 
+                ? 'bg-green-50 border-green-100 text-green-800' 
+                : toast.type === 'error' 
+                ? 'bg-red-50 border-red-100 text-red-800' 
+                : 'bg-blue-50 border-blue-100 text-blue-800'
+            }`}>
+              <span className="material-symbols-outlined text-sm shrink-0">
+                {toast.type === 'success' ? 'check_circle' : toast.type === 'error' ? 'error' : 'info'}
+              </span>
+              <span>{toast.message}</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Dynamic Ticket Scanner Modal (iframe safe) */}
+      <AnimatePresence>
+        {isScannerOpen && (
+          <motion.div
+            key="scanner-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 bg-[#10204A]/70 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl w-full max-w-sm shadow-2xl border border-gray-100 flex flex-col overflow-hidden max-h-[90vh]"
+            >
+              {/* Header */}
+              <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[#3d5ba9] font-bold text-xl">qr_code_scanner</span>
+                  <span className="font-space font-bold text-sm text-[#10204A]">Scanner de Ticket</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsScannerOpen(false);
+                    setSelectedScannerBooking(null);
+                    setManualCode("");
+                  }}
+                  className="w-8 h-8 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-sm font-bold">close</span>
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-5 flex-1 overflow-y-auto space-y-4">
+                {!selectedScannerBooking ? (
+                  <>
+                    {/* Simulated Camera Scanner box */}
+                    <div className="relative aspect-video w-full rounded-2xl bg-[#0a0f1d] overflow-hidden border border-gray-800 flex flex-col items-center justify-center">
+                      {/* Grid / target overlay */}
+                      <div className="absolute w-32 h-20 border-2 border-dashed border-green-500 rounded-lg flex items-center justify-center">
+                        <div className="w-2 h-2 bg-green-500 rounded-full animate-ping" />
+                      </div>
+                      
+                      {/* Animated Laser line */}
+                      <motion.div
+                        animate={{ y: [-40, 40] }}
+                        transition={{
+                          repeat: Infinity,
+                          repeatType: "reverse",
+                          duration: 1.5,
+                          ease: "easeInOut"
+                        }}
+                        className="absolute left-1/2 -translate-x-1/2 w-40 h-0.5 bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]"
+                      />
+
+                      {/* Info overlay */}
+                      <span className="absolute bottom-2 font-mono text-[9px] text-green-400 tracking-widest uppercase animate-pulse">
+                        Caméra Prête • Scannez le QR
+                      </span>
+                    </div>
+
+                    {/* Manual Input or Quick Simulation list */}
+                    <div className="space-y-3">
+                      <div className="text-center">
+                        <span className="text-gray-400 text-[10px] uppercase font-bold tracking-wider">Ou simulation rapide</span>
+                      </div>
+
+                      {/* Quick Select of driver's active/pending/accepted bookings to simulate scanning */}
+                      <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                        {myBookings.filter(b => b.status === 'pending' || b.status === 'accepted').length === 0 ? (
+                          <div className="text-center py-4 bg-gray-50 rounded-xl text-[11px] text-gray-500">
+                            Aucune réservation en attente de validation
+                          </div>
+                        ) : (
+                          myBookings
+                            .filter(b => b.status === 'pending' || b.status === 'accepted')
+                            .map((b, idx) => (
+                              <button
+                                key={`${b.id}-${idx}`}
+                                onClick={() => setSelectedScannerBooking(b)}
+                                className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-150 p-2.5 rounded-xl text-left flex items-center justify-between transition-colors active:scale-98 cursor-pointer group"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-space font-bold text-xs text-[#10204A] truncate">{b.passengerName}</span>
+                                    <span className="bg-[#3d5ba9]/10 text-[#3d5ba9] px-1.5 py-0.5 rounded font-mono text-[8px] font-bold uppercase">
+                                      {b.reference || 'DEM'}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-gray-500 truncate mt-0.5">
+                                    {b.from} ➜ {b.to}
+                                  </p>
+                                </div>
+                                <div className="text-right ml-2 flex items-center gap-1.5">
+                                  <span className="bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded font-mono text-[9px] font-bold">
+                                    {b.seatsCount || 1} Pl.
+                                  </span>
+                                  <span className="material-symbols-outlined text-gray-400 group-hover:text-[#3d5ba9] text-xs transition-colors">qr_code</span>
+                                </div>
+                              </button>
+                            ))
+                        )}
+                      </div>
+
+                      {/* Manual reference input */}
+                      <div className="pt-2 border-t border-gray-100">
+                        <label className="block text-gray-600 text-[10px] font-bold font-space uppercase mb-1">
+                          Entrer la référence ou le téléphone :
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={manualCode}
+                            onChange={(e) => setManualCode(e.target.value)}
+                            placeholder="Ex: DEM-A1B2 ou +22177..."
+                            className="bg-gray-50 border border-gray-200 text-xs px-3 py-2.5 rounded-xl flex-1 focus:outline-none focus:ring-1 focus:ring-[#3d5ba9]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!manualCode.trim()) return;
+                              const code = manualCode.trim().toLowerCase();
+                              const found = myBookings.find(b => 
+                                (b.reference && b.reference.toLowerCase().includes(code)) || 
+                                (b.phone && b.phone.includes(code)) || 
+                                (b.passengerName && b.passengerName.toLowerCase().includes(code))
+                              );
+                              if (found) {
+                                setSelectedScannerBooking(found);
+                              } else {
+                                showToast("Aucun ticket correspondant trouvé", "error");
+                              }
+                            }}
+                            className="bg-[#3d5ba9] hover:bg-[#3d5ba9]/90 text-white text-xs font-bold font-space px-4 py-2.5 rounded-xl active:scale-95 transition-transform shadow-sm cursor-pointer"
+                          >
+                            Trouver
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  /* Details & Validation Screen of scanned booking */
+                  <div className="space-y-4">
+                    <div className="bg-green-50/60 border border-green-100 p-4 rounded-2xl flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-100 text-green-600 rounded-full flex items-center justify-center shrink-0">
+                        <span className="material-symbols-outlined font-bold text-xl">qr_code_2</span>
+                      </div>
+                      <div>
+                        <h4 className="font-space font-bold text-xs text-[#10204A]">Ticket détecté !</h4>
+                        <p className="text-[10px] text-gray-500">Référence: <span className="font-mono font-bold text-green-700">{selectedScannerBooking.reference || 'DEM'}</span></p>
+                      </div>
+                    </div>
+
+                    <div className="border border-gray-100 rounded-2xl p-4 space-y-3 bg-gray-50/30">
+                      <div>
+                        <span className="text-[9px] uppercase font-bold text-gray-400 block tracking-wider">Passager</span>
+                        <p className="font-space font-bold text-[#10204A] text-xs">{selectedScannerBooking.passengerName}</p>
+                        <p className="font-mono text-[9px] text-gray-500">{selectedScannerBooking.phone}</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-100">
+                        <div>
+                          <span className="text-[9px] uppercase font-bold text-gray-400 block tracking-wider">Départ</span>
+                          <p className="font-sans font-semibold text-[#10204A] text-[11px] truncate">{selectedScannerBooking.from}</p>
+                        </div>
+                        <div>
+                          <span className="text-[9px] uppercase font-bold text-gray-400 block tracking-wider">Destination</span>
+                          <p className="font-sans font-semibold text-[#10204A] text-[11px] truncate">{selectedScannerBooking.to}</p>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+                        <div>
+                          <span className="text-[9px] uppercase font-bold text-gray-400 block tracking-wider">Places</span>
+                          <p className="font-space font-bold text-brand-orange text-xs">{selectedScannerBooking.seatsCount || 1} {selectedScannerBooking.seatsCount > 1 ? 'places' : 'place'}</p>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded font-mono text-[9px] font-bold uppercase ${
+                          selectedScannerBooking.status === 'pending' 
+                            ? 'bg-amber-100 text-amber-800' 
+                            : selectedScannerBooking.status === 'accepted'
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {selectedScannerBooking.status === 'pending' ? 'en attente' : selectedScannerBooking.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedScannerBooking(null)}
+                        className="py-3 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-500 font-space font-bold text-xs text-center flex-1 transition-all cursor-pointer active:scale-98"
+                      >
+                        Retour
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const isPending = selectedScannerBooking.status === 'pending';
+                          const nextStatus = isPending ? 'accepted' : 'completed';
+                          onUpdateBookingStatus(selectedScannerBooking.id, nextStatus);
+                          showToast(`Ticket validé avec succès ! Statut : ${nextStatus === 'accepted' ? 'Accepté' : 'Terminé'}`, 'success');
+                          
+                          setSelectedScannerBooking(null);
+                          setIsScannerOpen(false);
+                        }}
+                        className="py-3 rounded-xl bg-[#3d5ba9] hover:bg-[#3d5ba9]/90 text-white font-space font-bold text-xs text-center flex-1 transition-all shadow-md cursor-pointer active:scale-98"
+                      >
+                        Valider le ticket
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* PWA Install Guide Modal (iframe safe) */}
+      <AnimatePresence>
+        {isInstallGuideOpen && (
+          <motion.div
+            key="install-guide-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 bg-[#10204A]/75 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl w-full max-w-sm shadow-2xl border border-gray-100 flex flex-col overflow-hidden max-h-[90vh]"
+            >
+              {/* Header */}
+              <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                <div className="flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[#3d5ba9] font-bold text-xl">download_for_offline</span>
+                  <span className="font-space font-bold text-sm text-[#10204A]">Télécharger l'Application</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsInstallGuideOpen(false)}
+                  className="w-8 h-8 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-sm font-bold">close</span>
+                </button>
+              </div>
+
+              {/* Logo / Brand illustration */}
+              <div className="bg-gradient-to-b from-[#ebedff]/40 to-white pt-6 pb-4 flex flex-col items-center justify-center border-b border-gray-50">
+                <div className="w-16 h-16 rounded-2xl bg-white shadow-md p-2 flex items-center justify-center border border-gray-100 mb-2">
+                  <img
+                    src="/src/assets/images/log.png"
+                    alt="Logo DEM niou_dem"
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+                <h3 className="font-space font-bold text-[#10204A] text-sm">DEM niou_dem</h3>
+                <p className="text-[11px] text-gray-500">Ajoutez l'application sur votre écran d'accueil</p>
+              </div>
+
+              {/* OS Tabs */}
+              <div className="p-4 pb-0">
+                <div className="flex bg-gray-100 rounded-2xl p-1 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setInstallTab('android')}
+                    className={`flex-1 py-2.5 rounded-xl font-space font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      installTab === 'android'
+                        ? 'bg-[#3d5ba9] text-white shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-sm font-bold">android</span>
+                    Android
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInstallTab('ios')}
+                    className={`flex-1 py-2.5 rounded-xl font-space font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                      installTab === 'ios'
+                        ? 'bg-[#3d5ba9] text-white shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-sm font-bold">phone_iphone</span>
+                    iPhone / iOS
+                  </button>
+                </div>
+              </div>
+
+              {/* Body Content - Steps */}
+              <div className="p-5 flex-grow overflow-y-auto space-y-4">
+                {installTab === 'android' ? (
+                  <div className="space-y-3.5">
+                    <div className="flex gap-3.5 text-left items-start">
+                      <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                        1
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold text-[#10204A] text-xs">Ouvrir dans Chrome</p>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">Assurez-vous d'utiliser le navigateur <strong className="text-gray-700">Google Chrome</strong> sur votre appareil Android.</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3.5 text-left items-start">
+                      <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                        2
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold text-[#10204A] text-xs">Ouvrir le menu</p>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">Appuyez sur les trois points verticaux (<strong className="text-gray-700">⋮</strong>) situés en haut à droite du navigateur.</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3.5 text-left items-start">
+                      <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                        3
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold text-[#10204A] text-xs">Installer l'application</p>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">Sélectionnez <strong className="text-gray-700">"Ajouter à l'écran d'accueil"</strong> ou <strong className="text-gray-700">"Installer l'application"</strong> dans la liste.</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3.5 text-left items-start">
+                      <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                        4
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold text-[#10204A] text-xs">C'est prêt !</p>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">L'application s'affiche désormais comme une application native sur votre écran d'accueil avec son icône officielle.</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3.5">
+                    <div className="flex gap-3.5 text-left items-start">
+                      <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                        1
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold text-[#10204A] text-xs">Ouvrir dans Safari</p>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">L'installation sur iPhone requiert obligatoirement d'utiliser le navigateur <strong className="text-gray-700">Safari</strong>.</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3.5 text-left items-start">
+                      <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                        2
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold text-[#10204A] text-xs">Appuyer sur Partager</p>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">Appuyez sur le bouton de partage (l'icône carrée avec une flèche vers le haut <span className="text-xs bg-gray-100 px-1 py-0.5 rounded font-bold">⎋</span>) au bas de l'écran.</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3.5 text-left items-start">
+                      <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                        3
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold text-[#10204A] text-xs">Sur l'écran d'accueil</p>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">Faites défiler le menu vers le bas, puis sélectionnez <strong className="text-gray-700">"Sur l'écran d'accueil"</strong>.</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3.5 text-left items-start">
+                      <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                        4
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold text-[#10204A] text-xs">Ajouter</p>
+                        <p className="text-[11px] text-gray-500 leading-relaxed">Appuyez sur <strong className="text-gray-700">"Ajouter"</strong> en haut à droite pour finaliser la création de l'icône.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action footer */}
+              <div className="p-4 border-t border-gray-100 bg-gray-50/50 flex">
+                <button
+                  type="button"
+                  onClick={() => setIsInstallGuideOpen(false)}
+                  className="w-full bg-[#3d5ba9] hover:bg-[#3d5ba9]/90 text-white font-space font-bold text-xs py-3 rounded-2xl active:scale-98 transition-all shadow-md cursor-pointer text-center"
+                >
+                  J'ai compris
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}

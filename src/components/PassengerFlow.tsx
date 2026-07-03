@@ -99,6 +99,7 @@ export default function PassengerFlow({
   // Passenger Form State
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [password, setPassword] = useState('');
   const [referral, setReferral] = useState('');
   const [loginPhone, setLoginPhone] = useState('');
@@ -118,6 +119,8 @@ export default function PassengerFlow({
   const [searchTab, setSearchTab] = useState<'today' | 'tomorrow' | 'after_tomorrow' | 'custom'>('tomorrow');
   const [selectedDate, setSelectedDate] = useState<string>(tomorrowStr); // Format: YYYY-MM-DD (Default 25 June 2026)
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [isInstallGuideOpen, setIsInstallGuideOpen] = useState(false);
+  const [installTab, setInstallTab] = useState<'android' | 'ios'>('android');
   const [currentCalendarMonth, setCurrentCalendarMonth] = useState(new Date()); // June 2026
 
   // Dedicated Airport Booking State
@@ -171,6 +174,13 @@ export default function PassengerFlow({
     setCopiedSql(true);
     setTimeout(() => setCopiedSql(false), 2000);
   };
+
+  useEffect(() => {
+    const savedName = localStorage.getItem('dem_passenger_name');
+    const savedPhone = localStorage.getItem('dem_passenger_phone');
+    if (savedName) setFullName(savedName);
+    if (savedPhone) setPhone(savedPhone);
+  }, []);
 
   useEffect(() => {
     if (isSupabaseConfigured) {
@@ -782,6 +792,63 @@ export default function PassengerFlow({
     setScreen('login');
   };
 
+  const handleSaveProfile = async () => {
+    const cleanName = sanitizeInput(fullName.trim());
+    const cleanPhone = phone.trim();
+
+    if (!cleanName) {
+      alert('Le nom ne peut pas être vide');
+      return;
+    }
+    if (!cleanPhone) {
+      alert('Le numéro de téléphone ne peut pas être vide');
+      return;
+    }
+    if (!validatePhone(cleanPhone)) {
+      alert('Format de téléphone invalide. Utilisez un numéro sénégalais valide (ex: 771234567 ou +221771234567).');
+      return;
+    }
+
+    const passengerId = localStorage.getItem('dem_passenger_id');
+    if (!passengerId) {
+      alert('ID Passager introuvable.');
+      return;
+    }
+
+    setIsSavingProfile(true);
+
+    // Save in local storage
+    localStorage.setItem('dem_passenger_name', cleanName);
+    localStorage.setItem('dem_passenger_phone', cleanPhone);
+
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase
+          .from('passengers')
+          .update({
+            name: cleanName,
+            phone: cleanPhone
+          })
+          .eq('id', passengerId);
+
+        if (error) {
+          console.error('Supabase update profile error:', error.message);
+          alert('Enregistré localement, mais échec de la mise à jour sur Supabase : ' + error.message);
+        } else {
+          alert('Profil mis à jour avec succès sur Supabase et localement !');
+        }
+      } catch (err: any) {
+        console.error('Save profile error:', err);
+        alert('Erreur lors de la mise à jour : ' + err.message);
+      } finally {
+        setIsSavingProfile(false);
+      }
+    } else {
+      setIsSavingProfile(false);
+      alert('Profil mis à jour localement (Supabase non connecté) !');
+    }
+  };
+
   // Select driver from list to navigate to payment
   const handleSelectDriver = (driver: SearchDriver) => {
     setSelectedDriver(driver);
@@ -816,6 +883,8 @@ export default function PassengerFlow({
         finalPrice = (selectedDriver.price || 10000) + (100 * aibdPassengersCount);
       }
 
+      const seatsToDeduct = isAibd ? aibdPassengersCount : regularPassengersCount;
+
       const newBooking: PassengerBooking = {
         id: `b-${Date.now()}`,
         reference: refId,
@@ -832,12 +901,10 @@ export default function PassengerFlow({
         driverPhone: selectedDriver.phone,
         vehicleName: selectedDriver.vehicleName,
         vehiclePlate: selectedDriver.vehiclePlate,
-        pickupAddress: finalPickupAddress,
-        paymentMethod: paymentMethod
+        pickupAddress: `${finalPickupAddress} [Places: ${seatsToDeduct}]`,
+        paymentMethod: paymentMethod,
+        seatsCount: seatsToDeduct
       };
-      
-      // Decrease the seats count for that specific driver
-      const seatsToDeduct = isAibd ? aibdPassengersCount : regularPassengersCount;
       setAvailableDrivers(prevDrivers => 
         prevDrivers.map(d => {
           if (d.id === selectedDriver.id) {
@@ -937,7 +1004,7 @@ export default function PassengerFlow({
                 <div className="w-24 h-24 rounded-2xl bg-white shadow-lg p-3 flex items-center justify-center animate-bounce duration-1000">
                   <img
                     src="/src/assets/images/log.png"
-                    alt="Logo DEM Transport"
+                    alt="Logo DEM niou_dem"
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-contain"
                   />
@@ -950,7 +1017,7 @@ export default function PassengerFlow({
                   S'inscrire comme Passager
                 </h1>
                 <p className="font-sans text-sm text-gray-500 max-w-[280px] mx-auto">
-                  Rejoignez la communauté DEM pour des trajets confortables et sûrs.
+                  Rejoignez la communauté DEM niou_dem pour des trajets confortables et sûrs.
                 </p>
               </div>
 
@@ -1102,7 +1169,7 @@ export default function PassengerFlow({
                 <div className="w-24 h-24 rounded-2xl bg-white shadow-lg p-3 flex items-center justify-center animate-bounce duration-1000">
                   <img
                     src="/src/assets/images/log.png"
-                    alt="Logo DEM Transport"
+                    alt="Logo DEM niou_dem"
                     referrerPolicy="no-referrer"
                     className="w-full h-full object-contain"
                   />
@@ -1115,7 +1182,7 @@ export default function PassengerFlow({
                   Se Connecter (Passager)
                 </h1>
                 <p className="font-sans text-sm text-gray-500 max-w-[280px] mx-auto">
-                  Saisissez vos coordonnées pour accéder instantanément à votre espace de réservation.
+                  Saisissez vos coordonnées pour accéder instantanément à votre espace de réservation DEM niou_dem.
                 </p>
               </div>
 
@@ -1183,7 +1250,7 @@ export default function PassengerFlow({
               {/* Back to signup link */}
               <footer className="mt-6 text-center">
                 <p className="font-sans text-sm text-gray-500">
-                  Nouveau sur DEM Transport ?{' '}
+                  Nouveau sur DEM niou_dem ?{' '}
                   <button
                     type="button"
                     onClick={() => setScreen('register')}
@@ -1240,9 +1307,19 @@ export default function PassengerFlow({
                     <span className="text-white/70 text-[9px]">niou_dem</span>
                   </div>
                 </div>
-                <button className="bg-black/35 backdrop-blur-md w-9 h-9 rounded-full flex items-center justify-center text-white border border-white/20 hover:bg-white/10 transition-colors cursor-pointer">
-                  <span className="material-symbols-outlined text-base">notifications</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setIsInstallGuideOpen(true)}
+                    className="bg-black/35 backdrop-blur-md w-9 h-9 rounded-full flex items-center justify-center text-white border border-white/20 hover:bg-white/10 transition-colors cursor-pointer"
+                    title="Télécharger l'application"
+                    id="passenger-install-app-btn"
+                  >
+                    <span className="material-symbols-outlined text-base">download</span>
+                  </button>
+                  <button className="bg-black/35 backdrop-blur-md w-9 h-9 rounded-full flex items-center justify-center text-white border border-white/20 hover:bg-white/10 transition-colors cursor-pointer">
+                    <span className="material-symbols-outlined text-base">notifications</span>
+                  </button>
+                </div>
               </div>
 
               {/* Greeting */}
@@ -2015,6 +2092,7 @@ export default function PassengerFlow({
             <AnimatePresence>
               {isFilterOpen && (
                 <motion.div
+                  key="filters-panel"
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}
                   exit={{ height: 0, opacity: 0 }}
@@ -2144,11 +2222,11 @@ export default function PassengerFlow({
                   <p className="text-[10px] text-gray-400">Les trajets réels enregistrés s'afficheront ici.</p>
                 </div>
               ) : (
-                displayedDrivers.map((driver) => {
+                displayedDrivers.map((driver, index) => {
                   const isFull = driver.verified === 'COMPLET';
                   return (
                     <div
-                      key={driver.id}
+                      key={`${driver.id}-${index}`}
                       className={`bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col justify-between transition-all duration-150 ${
                         isFull ? 'opacity-70 grayscale-[0.3]' : 'hover:scale-[1.01] hover:shadow-md'
                       }`}
@@ -2277,9 +2355,18 @@ export default function PassengerFlow({
                 <span className="material-symbols-outlined">arrow_back</span>
               </button>
               <h1 className="font-space font-bold text-base text-[#10204A]">Paiement</h1>
-              <button className="p-2 rounded-full hover:bg-gray-100 text-gray-500 transition-colors cursor-pointer">
-                <span className="material-symbols-outlined text-base">notifications</span>
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setIsInstallGuideOpen(true)}
+                  className="p-2 rounded-full hover:bg-gray-100 text-gray-500 transition-colors cursor-pointer"
+                  title="Télécharger l'application"
+                >
+                  <span className="material-symbols-outlined text-base">download</span>
+                </button>
+                <button className="p-2 rounded-full hover:bg-gray-100 text-gray-500 transition-colors cursor-pointer">
+                  <span className="material-symbols-outlined text-base">notifications</span>
+                </button>
+              </div>
             </header>
 
             <div className="px-5 pt-5 space-y-6 flex-grow">
@@ -2688,9 +2775,9 @@ export default function PassengerFlow({
                 </div>
 
                 <div className="space-y-3">
-                  {bookings.filter(b => b.phone.includes(searchQuery)).map((b) => (
+                  {bookings.filter(b => b.phone.includes(searchQuery)).map((b, idx) => (
                     <article
-                      key={b.id}
+                      key={`${b.id}-${idx}`}
                       onClick={() => {
                         setViewedBooking(b);
                         setScreen('ticket');
@@ -2905,6 +2992,27 @@ export default function PassengerFlow({
                     </div>
                   </div>
                 </div>
+
+                <button
+                  onClick={handleSaveProfile}
+                  disabled={isSavingProfile}
+                  className="w-full mt-4 h-11 bg-brand-orange hover:bg-brand-orange/95 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all rounded-xl text-white font-space font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-[0.98]"
+                >
+                  {isSavingProfile ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Enregistrement...
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-sm">save</span>
+                      Enregistrer les modifications
+                    </>
+                  )}
+                </button>
               </section>
 
 
@@ -3218,11 +3326,13 @@ export default function PassengerFlow({
             </div>
           </motion.div>
         )}
+      </AnimatePresence>
 
         {/* Custom Calendar Modal */}
         <AnimatePresence>
           {isCalendarOpen && (
             <motion.div
+              key="calendar-modal-backdrop"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -3399,7 +3509,184 @@ export default function PassengerFlow({
           )}
         </AnimatePresence>
 
-      </AnimatePresence>
+        {/* PWA Install Guide Modal (iframe safe) */}
+        <AnimatePresence>
+          {isInstallGuideOpen && (
+            <motion.div
+              key="install-guide-modal-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-50 bg-[#10204A]/75 backdrop-blur-sm flex items-center justify-center p-4"
+            >
+              <motion.div
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 20 }}
+                className="bg-white rounded-3xl w-full max-w-sm shadow-2xl border border-gray-100 flex flex-col overflow-hidden max-h-[90vh]"
+              >
+                {/* Header */}
+                <div className="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[#3d5ba9] font-bold text-xl">download_for_offline</span>
+                    <span className="font-space font-bold text-sm text-[#10204A]">Télécharger l'Application</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsInstallGuideOpen(false)}
+                    className="w-8 h-8 rounded-full bg-gray-100 text-gray-500 hover:bg-gray-200 active:scale-95 transition-all flex items-center justify-center cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-sm font-bold">close</span>
+                  </button>
+                </div>
+
+                {/* Logo / Brand illustration */}
+                <div className="bg-gradient-to-b from-[#ebedff]/40 to-white pt-6 pb-4 flex flex-col items-center justify-center border-b border-gray-50">
+                  <div className="w-16 h-16 rounded-2xl bg-white shadow-md p-2 flex items-center justify-center border border-gray-100 mb-2">
+                    <img
+                      src="/src/assets/images/log.png"
+                      alt="Logo DEM niou_dem"
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                  <h3 className="font-space font-bold text-[#10204A] text-sm">DEM niou_dem</h3>
+                  <p className="text-[11px] text-gray-500">Ajoutez l'application sur votre écran d'accueil</p>
+                </div>
+
+                {/* OS Tabs */}
+                <div className="p-4 pb-0">
+                  <div className="flex bg-gray-100 rounded-2xl p-1 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setInstallTab('android')}
+                      className={`flex-1 py-2.5 rounded-xl font-space font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        installTab === 'android'
+                          ? 'bg-[#3d5ba9] text-white shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-sm font-bold">android</span>
+                      Android
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInstallTab('ios')}
+                      className={`flex-1 py-2.5 rounded-xl font-space font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                        installTab === 'ios'
+                          ? 'bg-[#3d5ba9] text-white shadow-sm'
+                          : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-sm font-bold">phone_iphone</span>
+                      iPhone / iOS
+                    </button>
+                  </div>
+                </div>
+
+                {/* Body Content - Steps */}
+                <div className="p-5 flex-grow overflow-y-auto space-y-4">
+                  {installTab === 'android' ? (
+                    <div className="space-y-3.5">
+                      <div className="flex gap-3.5 text-left items-start">
+                        <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                          1
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-[#10204A] text-xs">Ouvrir dans Chrome</p>
+                          <p className="text-[11px] text-gray-500 leading-relaxed">Assurez-vous d'utiliser le navigateur <strong className="text-gray-700">Google Chrome</strong> sur votre appareil Android.</p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3.5 text-left items-start">
+                        <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                          2
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-[#10204A] text-xs">Ouvrir le menu</p>
+                          <p className="text-[11px] text-gray-500 leading-relaxed">Appuyez sur les trois points verticaux (<strong className="text-gray-700">⋮</strong>) situés en haut à droite du navigateur.</p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3.5 text-left items-start">
+                        <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                          3
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-[#10204A] text-xs">Installer l'application</p>
+                          <p className="text-[11px] text-gray-500 leading-relaxed">Sélectionnez <strong className="text-gray-700">"Ajouter à l'écran d'accueil"</strong> ou <strong className="text-gray-700">"Installer l'application"</strong> dans la liste.</p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3.5 text-left items-start">
+                        <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                          4
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-[#10204A] text-xs">C'est prêt !</p>
+                          <p className="text-[11px] text-gray-500 leading-relaxed">L'application s'affiche désormais comme une application native sur votre écran d'accueil avec son icône officielle.</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3.5">
+                      <div className="flex gap-3.5 text-left items-start">
+                        <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                          1
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-[#10204A] text-xs">Ouvrir dans Safari</p>
+                          <p className="text-[11px] text-gray-500 leading-relaxed">L'installation sur iPhone requiert obligatoirement d'utiliser le navigateur <strong className="text-gray-700">Safari</strong>.</p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3.5 text-left items-start">
+                        <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                          2
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-[#10204A] text-xs">Appuyer sur Partager</p>
+                          <p className="text-[11px] text-gray-500 leading-relaxed">Appuyez sur le bouton de partage (l'icône carrée avec une flèche vers le haut <span className="text-xs bg-gray-100 px-1 py-0.5 rounded font-bold">⎋</span>) au bas de l'écran.</p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3.5 text-left items-start">
+                        <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                          3
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-[#10204A] text-xs">Sur l'écran d'accueil</p>
+                          <p className="text-[11px] text-gray-500 leading-relaxed">Faites défiler le menu vers le bas, puis sélectionnez <strong className="text-gray-700">"Sur l'écran d'accueil"</strong>.</p>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3.5 text-left items-start">
+                        <div className="w-6 h-6 rounded-full bg-blue-50 text-[#3d5ba9] font-space font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                          4
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-[#10204A] text-xs">Ajouter</p>
+                          <p className="text-[11px] text-gray-500 leading-relaxed">Appuyez sur <strong className="text-gray-700">"Ajouter"</strong> en haut à droite pour finaliser la création de l'icône.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Action footer */}
+                <div className="p-4 border-t border-gray-100 bg-gray-50/50 flex">
+                  <button
+                    type="button"
+                    onClick={() => setIsInstallGuideOpen(false)}
+                    className="w-full bg-[#3d5ba9] hover:bg-[#3d5ba9]/90 text-white font-space font-bold text-xs py-3 rounded-2xl active:scale-98 transition-all shadow-md cursor-pointer text-center"
+                  >
+                    J'ai compris
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
     </div>
   );
 }
