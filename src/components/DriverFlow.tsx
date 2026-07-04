@@ -266,6 +266,12 @@ export default function DriverFlow({
               });
 
               if (found) {
+                // Restrict to only active/pending/accepted tickets. If completed or cancelled, prevent and notify
+                if (found.status === 'completed' || found.status === 'cancelled' || found.status === 'refused') {
+                  showToast(`Ce ticket (${found.reference}) est déjà clôturé ou expiré !`, "error");
+                  return;
+                }
+
                 setSelectedScannerBooking(found);
                 showToast("Code QR scanné avec succès !", "success");
                 
@@ -631,7 +637,11 @@ export default function DriverFlow({
         avatar: editAvatar,
         vehicle_name: editVehicleBrand,
         vehicle_plate: editVehiclePlate,
-        seats_available: parseInt(editVehicleSeats) || 15
+        seats_available: parseInt(editVehicleSeats) || 15,
+        email: editEmail,
+        license: editLicense,
+        experience: editExperience,
+        vehicle_image: editVehicleImage
       };
 
       const updateQuery = driverId 
@@ -3682,8 +3692,8 @@ export default function DriverFlow({
                       {/* Quick Select of driver's active/pending/accepted bookings to simulate scanning */}
                       <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
                         {(() => {
-                          const driverActive = myBookings.filter(b => b.status === 'pending' || b.status === 'accepted');
-                          const allActive = bookings.filter(b => b.status === 'pending' || b.status === 'accepted');
+                          const driverActive = myBookings.filter(b => b.status !== 'completed' && b.status !== 'cancelled' && b.status !== 'refused');
+                          const allActive = bookings.filter(b => b.status !== 'completed' && b.status !== 'cancelled' && b.status !== 'refused');
                           const listToShow = driverActive.length > 0 ? driverActive : allActive;
 
                           if (listToShow.length === 0) {
@@ -3747,6 +3757,10 @@ export default function DriverFlow({
                                 return bRef.includes(code) || bPhone.includes(code) || bName.includes(code);
                               });
                               if (found) {
+                                if (found.status === 'completed' || found.status === 'cancelled' || found.status === 'refused') {
+                                  showToast(`Ce ticket (${found.reference || 'DEM'}) est déjà clôturé ou expiré !`, "error");
+                                  return;
+                                }
                                 setSelectedScannerBooking(found);
                               } else {
                                 showToast("Aucun ticket correspondant trouvé dans le système", "error");

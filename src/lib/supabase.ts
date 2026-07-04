@@ -30,8 +30,18 @@ create table if not exists public.drivers (
   password text,
   boarding_place text,
   is_online boolean default true,
+  email text,
+  license text,
+  experience text,
+  vehicle_image text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- IMPORTANT: Si votre table drivers existe déjà sur Supabase, exécutez cette requête SQL dans votre éditeur SQL Supabase :
+-- alter table public.drivers add column if not exists email text;
+-- alter table public.drivers add column if not exists license text;
+-- alter table public.drivers add column if not exists experience text;
+-- alter table public.drivers add column if not exists vehicle_image text;
 
 -- Activez Row Level Security (RLS) mais permettez l'accès en lecture/écriture publique pour cette démo
 alter table public.drivers enable row level security;
