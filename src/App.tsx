@@ -75,12 +75,12 @@ export default function App() {
 
     window.addEventListener('resize', detectDevTools);
     
-    // Periodically clear console as extra safety measure
+    // Periodically clear console at a gentle pace as extra safety measure
     const consoleInterval = setInterval(() => {
       try {
         console.clear();
       } catch (e) {}
-    }, 2000);
+    }, 30000); // 30 seconds instead of 2 seconds to reduce CPU wakeups
 
     return () => {
       document.removeEventListener('contextmenu', handleContextMenu);
@@ -149,8 +149,24 @@ export default function App() {
       };
       fetchBookings();
 
-      const interval = setInterval(fetchBookings, 1000);
-      return () => clearInterval(interval);
+      // Subscribe to real-time changes on bookings
+      const channel = supabase
+        .channel('bookings-realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'bookings' },
+          () => {
+            fetchBookings();
+          }
+        )
+        .subscribe();
+
+      // Gentle fallback polling every 12 seconds instead of every 1 second
+      const interval = setInterval(fetchBookings, 12000);
+      return () => {
+        supabase.removeChannel(channel);
+        clearInterval(interval);
+      };
     }
   }, []);
 
@@ -268,6 +284,7 @@ export default function App() {
             bookings={bookings}
             addBooking={handleAddBooking}
             deleteBooking={handleDeleteBooking}
+            onUpdateBookingStatus={handleUpdateBookingStatus}
             currentScreen={passengerScreen}
             setScreen={setPassengerScreen}
             onBackToWelcome={handleBackToWelcome}

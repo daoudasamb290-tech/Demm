@@ -15,10 +15,89 @@ interface PassengerFlowProps {
   bookings: PassengerBooking[];
   addBooking: (booking: PassengerBooking) => void;
   deleteBooking: (id: string) => void;
+  onUpdateBookingStatus?: (id: string, status: 'active' | 'completed' | 'cancelled' | 'pending' | 'accepted' | 'refused') => void;
   currentScreen: 'register' | 'login' | 'home' | 'search_results' | 'pay' | 'ticket' | 'bookings' | 'profil' | 'aibd_booking';
   setScreen: (screen: 'register' | 'login' | 'home' | 'search_results' | 'pay' | 'ticket' | 'bookings' | 'profil' | 'aibd_booking') => void;
   onBackToWelcome: () => void;
 }
+
+const getRefundInfo = (bookingDateStr: string, bookingTimeStr: string) => {
+  try {
+    let isoDate = "";
+    const now = new Date();
+    const currentYear = now.getFullYear();
+
+    const frenchMonths: { [key: string]: string } = {
+      'janvier': '01', 'février': '02', 'mars': '03', 'avril': '04', 'mai': '05', 'juin': '06',
+      'juillet': '07', 'août': '08', 'septembre': '09', 'octobre': '10', 'novembre': '11', 'décembre': '12',
+      'janv': '01', 'févr': '02', 'mar': '03', 'avr': '04', 'mai.': '05', 'juin.': '06',
+      'juil': '07', 'août.': '08', 'sept': '09', 'oct': '10', 'nov': '11', 'déc': '12'
+    };
+
+    const cleanDateStr = bookingDateStr.trim().toLowerCase().replace(/[\.,]/g, '');
+    
+    if (/^\d{4}-\d{2}-\d{2}$/.test(cleanDateStr)) {
+      isoDate = cleanDateStr;
+    } else {
+      const parts = cleanDateStr.split(/\s+/).filter(p => !['sam', 'dim', 'lun', 'mar', 'mer', 'jeu', 'ven'].includes(p));
+      
+      let day = "01";
+      let month = "06";
+      let year = String(currentYear);
+
+      if (parts.length >= 1) {
+        const dayMatch = parts.find(p => /^\d+$/.test(p));
+        if (dayMatch) {
+          day = dayMatch.padStart(2, '0');
+        }
+        
+        const monthMatch = parts.find(p => frenchMonths[p] !== undefined);
+        if (monthMatch) {
+          month = frenchMonths[monthMatch];
+        } else {
+          for (const key of Object.keys(frenchMonths)) {
+            if (parts.some(p => p.includes(key))) {
+              month = frenchMonths[key];
+              break;
+            }
+          }
+        }
+
+        const yearMatch = parts.find(p => p.length === 4 && /^\d{4}$/.test(p));
+        if (yearMatch) {
+          year = yearMatch;
+        }
+      }
+      isoDate = `${year}-${month}-${day}`;
+    }
+
+    const [hourStr, minStr] = (bookingTimeStr || "08:00").split(':');
+    const bookingDateTime = new Date(
+      parseInt(isoDate.split('-')[0]),
+      parseInt(isoDate.split('-')[1]) - 1,
+      parseInt(isoDate.split('-')[2]),
+      parseInt(hourStr),
+      parseInt(minStr)
+    );
+
+    if (isNaN(bookingDateTime.getTime())) {
+      return { rate: 50, label: "Remboursement Anticipé (50%)", durationHours: null };
+    }
+
+    const diffMs = bookingDateTime.getTime() - now.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+
+    if (diffHours < 0) {
+      return { rate: 0, label: "Départ déjà passé", durationHours: diffHours };
+    } else if (diffHours < 2) {
+      return { rate: 25, label: "Annulation Tardive (25%)", durationHours: diffHours };
+    } else {
+      return { rate: 50, label: "Annulation Anticipée (50%)", durationHours: diffHours };
+    }
+  } catch (err) {
+    return { rate: 50, label: "Annulation Anticipée (50%)", durationHours: null };
+  }
+};
 
 const getCityAbbreviation = (city: string): string => {
   if (!city) return '';
@@ -89,6 +168,7 @@ export default function PassengerFlow({
   bookings,
   addBooking,
   deleteBooking,
+  onUpdateBookingStatus,
   currentScreen,
   setScreen,
   onBackToWelcome
@@ -121,6 +201,8 @@ export default function PassengerFlow({
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [isInstallGuideOpen, setIsInstallGuideOpen] = useState(false);
   const [installTab, setInstallTab] = useState<'android' | 'ios'>('android');
+  const [isTermsOpen, setIsTermsOpen] = useState(false);
+  const [termsTab, setTermsTab] = useState<'terms' | 'privacy'>('terms');
   const [currentCalendarMonth, setCurrentCalendarMonth] = useState(new Date()); // June 2026
 
   // Dedicated Airport Booking State
@@ -262,8 +344,31 @@ export default function PassengerFlow({
       };
       fetchDrivers();
 
-      const interval = setInterval(fetchDrivers, 1000);
-      return () => clearInterval(interval);
+      // Subscribe to real-time changes on both drivers and driver_trips tables
+      const driversChannel = supabase
+        .channel('drivers-realtime-passenger')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'drivers' },
+          () => {
+            fetchDrivers();
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'driver_trips' },
+          () => {
+            fetchDrivers();
+          }
+        )
+        .subscribe();
+
+      // Gentle fallback polling every 12 seconds instead of 1 second
+      const interval = setInterval(fetchDrivers, 12000);
+      return () => {
+        supabase.removeChannel(driversChannel);
+        clearInterval(interval);
+      };
     } else {
       // Fallback when Supabase is NOT configured
       const loadLocalDrivers = () => {
@@ -281,7 +386,9 @@ export default function PassengerFlow({
         }
       };
       loadLocalDrivers();
-      const interval = setInterval(loadLocalDrivers, 1000);
+      
+      // Check localStorage occasionally (every 10 seconds) instead of hammering it every 1 second
+      const interval = setInterval(loadLocalDrivers, 10000);
       return () => clearInterval(interval);
     }
   }, []);
@@ -1108,7 +1215,30 @@ export default function PassengerFlow({
 
                 {/* Terms Notice */}
                 <p className="text-center font-sans text-xs text-gray-400 px-4 py-2 leading-relaxed">
-                  En vous inscrivant, vous acceptez nos <a className="text-brand-orange font-semibold underline" href="#terms">Conditions d'utilisation</a> et notre <a className="text-brand-orange font-semibold underline" href="#privacy">Politique de confidentialité</a>.
+                  En vous inscrivant, vous acceptez nos{' '}
+                  <a
+                    className="text-brand-orange font-semibold underline cursor-pointer"
+                    href="#terms"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setTermsTab('terms');
+                      setIsTermsOpen(true);
+                    }}
+                  >
+                    Conditions d'utilisation
+                  </a>{' '}
+                  et notre{' '}
+                  <a
+                    className="text-brand-orange font-semibold underline cursor-pointer"
+                    href="#privacy"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setTermsTab('privacy');
+                      setIsTermsOpen(true);
+                    }}
+                  >
+                    Politique de confidentialité
+                  </a>.
                 </p>
 
                 {/* Submit button */}
@@ -3247,10 +3377,32 @@ export default function PassengerFlow({
                     </div>
                     <div className="text-left">
                       <p className="text-gray-400 text-[9px] font-mono font-semibold uppercase mb-0.5">Statut</p>
-                      <p className="font-bold text-emerald-600 uppercase flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-                        <span>Confirmé</span>
-                      </p>
+                      {viewedBooking.status === 'cancelled' ? (
+                        <p className="font-bold text-red-600 uppercase flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 bg-red-500 rounded-full" />
+                          <span>Annulé</span>
+                        </p>
+                      ) : viewedBooking.status === 'completed' ? (
+                        <p className="font-bold text-blue-600 uppercase flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
+                          <span>Terminé</span>
+                        </p>
+                      ) : viewedBooking.status === 'refused' ? (
+                        <p className="font-bold text-red-600 uppercase flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 bg-red-500 rounded-full" />
+                          <span>Refusé</span>
+                        </p>
+                      ) : viewedBooking.status === 'pending' ? (
+                        <p className="font-bold text-amber-600 uppercase flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
+                          <span>En attente</span>
+                        </p>
+                      ) : (
+                        <p className="font-bold text-emerald-600 uppercase flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                          <span>Confirmé</span>
+                        </p>
+                      )}
                     </div>
                     <div className="col-span-2 text-left">
                       <p className="text-gray-400 text-[9px] font-mono font-semibold uppercase mb-0.5">Adresse de prise en charge</p>
@@ -3314,6 +3466,36 @@ export default function PassengerFlow({
               >
                 Retour à l'accueil
               </button>
+
+              {/* Cancellation Button with Refund Calculation */}
+              {viewedBooking.status !== 'cancelled' && viewedBooking.status !== 'completed' && viewedBooking.status !== 'refused' && (
+                <button
+                  onClick={() => {
+                    const refundInfo = getRefundInfo(viewedBooking.date, viewedBooking.time);
+                    let confirmMsg = `Voulez-vous vraiment annuler ce ticket (${viewedBooking.reference}) ?\n\n`;
+                    confirmMsg += `Selon nos conditions d'annulation :\n`;
+                    confirmMsg += `- Plus de 2h avant le départ : 50% de remboursement.\n`;
+                    confirmMsg += `- Moins de 2h avant le départ : 25% de remboursement.\n\n`;
+                    confirmMsg += `Votre départ est prévu le ${viewedBooking.date} à ${viewedBooking.time}.\n`;
+                    confirmMsg += `Statut d'annulation calculé : ${refundInfo.label}\n\n`;
+                    confirmMsg += `Confirmer l'annulation ?`;
+                    
+                    if (confirm(confirmMsg)) {
+                      if (onUpdateBookingStatus) {
+                        onUpdateBookingStatus(viewedBooking.id, 'cancelled');
+                        alert(`Votre réservation a été annulée. Conformément à notre politique, vous êtes éligible à un remboursement de ${refundInfo.rate}%.`);
+                      } else {
+                        deleteBooking(viewedBooking.id);
+                        alert(`Réservation supprimée.`);
+                        setScreen('home');
+                      }
+                    }
+                  }}
+                  className="mt-2 w-full py-3 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-sans font-bold text-xs rounded-xl cursor-pointer transition-colors"
+                >
+                  Annuler la réservation ({getRefundInfo(viewedBooking.date, viewedBooking.time).rate}% remboursé)
+                </button>
+              )}
             </main>
 
             {/* Bottom Download Bar */}
@@ -3696,6 +3878,136 @@ export default function PassengerFlow({
                     className="w-full bg-[#3d5ba9] hover:bg-[#3d5ba9]/90 text-white font-space font-bold text-xs py-3 rounded-2xl active:scale-98 transition-all shadow-md cursor-pointer text-center"
                   >
                     J'ai compris
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Modal de Conditions & Confidentialité */}
+        <AnimatePresence>
+          {isTermsOpen && (
+            <motion.div
+              key="terms-modal-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[100] flex items-center justify-center p-4"
+              onClick={() => setIsTermsOpen(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.95, y: 15 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 15 }}
+                className="bg-white rounded-[28px] shadow-2xl w-full max-w-sm overflow-hidden border border-gray-100 flex flex-col max-h-[85vh]"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="bg-[#10204A] text-white p-5 text-left relative shrink-0">
+                  <p className="text-[10px] uppercase font-mono tracking-widest text-white/70">Mentions Légales &amp; Règles</p>
+                  <h3 className="font-space font-bold text-lg mt-1">
+                    {termsTab === 'terms' ? "Conditions d'utilisation" : "Politique de confidentialité"}
+                  </h3>
+                  <button
+                    onClick={() => setIsTermsOpen(false)}
+                    className="absolute top-5 right-5 text-white/80 hover:text-white cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined">close</span>
+                  </button>
+                </div>
+
+                {/* Tabs Selector inside Modal */}
+                <div className="flex border-b border-gray-100 shrink-0 bg-gray-50/50">
+                  <button
+                    type="button"
+                    onClick={() => setTermsTab('terms')}
+                    className={`flex-1 py-3 text-xs font-space font-bold border-b-2 transition-all ${
+                      termsTab === 'terms'
+                        ? 'border-brand-orange text-brand-orange bg-white'
+                        : 'border-transparent text-gray-400 hover:text-gray-600'
+                    }`}
+                  >
+                    Conditions d'utilisation
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTermsTab('privacy')}
+                    className={`flex-1 py-3 text-xs font-space font-bold border-b-2 transition-all ${
+                      termsTab === 'privacy'
+                        ? 'border-brand-orange text-brand-orange bg-white'
+                        : 'border-transparent text-gray-400 hover:text-gray-600'
+                    }`}
+                  >
+                    Confidentialité &amp; Annulation
+                  </button>
+                </div>
+
+                {/* Modal Content (Scrollable) */}
+                <div className="p-5 flex-grow overflow-y-auto space-y-4 text-xs text-gray-600 text-left leading-relaxed">
+                  {termsTab === 'terms' ? (
+                    <div className="space-y-3">
+                      <p className="font-semibold text-[#10204A]">1. Acceptation des conditions</p>
+                      <p>
+                        En utilisant l'application DEM niou_dem, vous acceptez d'être lié par nos présentes conditions d'utilisation. Si vous n'acceptez pas ces conditions, veuillez ne pas utiliser nos services.
+                      </p>
+                      <p className="font-semibold text-[#10204A]">2. Réservations et Tarifs</p>
+                      <p>
+                        Les prix affichés lors de votre réservation de trajet sont calculés selon le type de trajet (Régulier ou Aéroport AIBD) et d'éventuels suppléments de prise en charge à domicile.
+                      </p>
+                      <p className="font-semibold text-[#10204A]">3. Obligations des Passagers</p>
+                      <p>
+                        Les passagers s'engagent à se présenter à l'heure convenue au point d'embarquement indiqué. Le chauffeur se réserve le droit de refuser l'accès au véhicule en cas de comportement inapproprié.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div>
+                        <p className="font-semibold text-[#10204A] mb-1">1. Collecte des Données Personnelles</p>
+                        <p>
+                          Nous collectons votre nom, prénom, mot de passe chiffré, et numéro de téléphone mobile uniquement pour faciliter vos réservations de transport et la communication avec vos chauffeurs.
+                        </p>
+                      </div>
+
+                      <div className="bg-amber-50 border border-amber-100 rounded-xl p-3.5 space-y-2">
+                        <p className="font-bold text-[#10204A] flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-amber-600 text-base">info</span>
+                          Politique d'Annulation &amp; Remboursement
+                        </p>
+                        <p className="text-[11px] leading-relaxed text-gray-700">
+                          Nous comprenons que les plans peuvent changer. Vos droits à remboursement sont encadrés par notre politique temporelle stricte :
+                        </p>
+                        <ul className="list-disc pl-4 space-y-1 text-[11px] text-gray-700 font-medium">
+                          <li>
+                            <strong className="text-[#10204A]">Annulation Anticipée :</strong> Si vous annulez votre trajet <span className="text-brand-orange font-bold">plus de 2 heures</span> avant l'heure de départ prévue, vous recevrez un remboursement de <strong className="text-emerald-700 text-xs font-extrabold">50%</strong> du montant payé.
+                          </li>
+                          <li>
+                            <strong className="text-[#10204A]">Annulation Tardive :</strong> Si vous annulez <span className="text-brand-orange font-bold">dans les 2 heures</span> précédant le départ, vous bénéficierez d'un remboursement partiel de <strong className="text-amber-700 text-xs font-extrabold">25%</strong>.
+                          </li>
+                          <li>
+                            <strong className="text-[#10204A]">Départ Passé :</strong> Aucun remboursement n'est possible une fois le départ du véhicule effectué ou l'heure dépassée.
+                          </li>
+                        </ul>
+                      </div>
+
+                      <div>
+                        <p className="font-semibold text-[#10204A] mb-1">3. Sécurité des Informations</p>
+                        <p>
+                          Toutes vos réservations de transport sont enregistrées de manière sécurisée et chiffrée sur notre cloud Supabase pour garantir qu'aucun tiers non autorisé ne puisse y accéder.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Modal Footer */}
+                <div className="p-4 border-t border-gray-150 bg-gray-50/50 flex">
+                  <button
+                    type="button"
+                    onClick={() => setIsTermsOpen(false)}
+                    className="w-full bg-[#10204A] hover:bg-[#10204A]/95 text-white font-space font-bold text-xs py-3 rounded-xl active:scale-[0.98] transition-all shadow-md cursor-pointer text-center"
+                  >
+                    J'accepte et je ferme
                   </button>
                 </div>
               </motion.div>

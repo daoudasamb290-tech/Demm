@@ -211,12 +211,85 @@ export default function DriverFlow({
 
   // Interactivity States
   const [isOnline, setIsOnline] = useState(true);
-  const [walletBalance, setWalletBalance] = useState(47500);
+  
+  const currentDriverPhone = driverPhone || (typeof window !== 'undefined' ? localStorage.getItem('dem_driver_phone') : '') || '';
+  const currentDriverName = driverName || (typeof window !== 'undefined' ? localStorage.getItem('dem_driver_name') : '') || '';
+
+  const [walletBalance, setWalletBalance] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const storedPhone = localStorage.getItem('dem_driver_phone') || '';
+      if (storedPhone) {
+        const storedBalance = localStorage.getItem(`dem_driver_wallet_balance_${storedPhone}`);
+        if (storedBalance !== null) {
+          return parseInt(storedBalance, 10);
+        }
+        return 0; // New accounts start at 0
+      }
+    }
+    return 47500;
+  });
+
+  const [transactions, setTransactions] = useState<DriverTransaction[]>(() => {
+    if (typeof window !== 'undefined') {
+      const storedPhone = localStorage.getItem('dem_driver_phone') || '';
+      if (storedPhone) {
+        const storedTxs = localStorage.getItem(`dem_driver_transactions_${storedPhone}`);
+        if (storedTxs) {
+          try {
+            return JSON.parse(storedTxs);
+          } catch (e) {
+            console.error(e);
+          }
+        }
+      }
+    }
+    return [];
+  });
+
+  // Sync wallet balance and transactions whenever they change or when the logged-in driver changes
+  useEffect(() => {
+    if (typeof window !== 'undefined' && currentDriverPhone) {
+      localStorage.setItem(`dem_driver_wallet_balance_${currentDriverPhone}`, String(walletBalance));
+    }
+  }, [walletBalance, currentDriverPhone]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && currentDriverPhone) {
+      localStorage.setItem(`dem_driver_transactions_${currentDriverPhone}`, JSON.stringify(transactions));
+    }
+  }, [transactions, currentDriverPhone]);
+
+  // Load correct values when the driver logs in or changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (currentDriverPhone) {
+        const storedBalance = localStorage.getItem(`dem_driver_wallet_balance_${currentDriverPhone}`);
+        if (storedBalance !== null) {
+          setWalletBalance(parseInt(storedBalance, 10));
+        } else {
+          setWalletBalance(0);
+          localStorage.setItem(`dem_driver_wallet_balance_${currentDriverPhone}`, '0');
+        }
+
+        const storedTxs = localStorage.getItem(`dem_driver_transactions_${currentDriverPhone}`);
+        if (storedTxs) {
+          try {
+            setTransactions(JSON.parse(storedTxs));
+          } catch (e) {
+            setTransactions([]);
+          }
+        } else {
+          setTransactions([]);
+        }
+      } else {
+        setWalletBalance(47500);
+        setTransactions([]);
+      }
+    }
+  }, [currentDriverPhone]);
+
   const [isCommissionPaid, setIsCommissionPaid] = useState(false);
   const [driverTrips, setDriverTrips] = useState<DriverTrip[]>([]);
-
-  const currentDriverPhone = driverPhone || localStorage.getItem('dem_driver_phone') || '';
-  const currentDriverName = driverName || localStorage.getItem('dem_driver_name') || '';
 
   const myBookings = bookings.filter((b) => {
     const cleanDriverPhone = currentDriverPhone ? currentDriverPhone.replace(/\D/g, '') : '';
@@ -355,8 +428,24 @@ export default function DriverFlow({
       };
       fetchDriverTrips();
 
-      const interval = setInterval(fetchDriverTrips, 1000);
-      return () => clearInterval(interval);
+      // Subscribe to real-time changes on driver_trips table
+      const tripsChannel = supabase
+        .channel('driver-trips-realtime')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'driver_trips' },
+          () => {
+            fetchDriverTrips();
+          }
+        )
+        .subscribe();
+
+      // Gentle fallback polling every 12 seconds instead of every 1 second
+      const interval = setInterval(fetchDriverTrips, 12000);
+      return () => {
+        supabase.removeChannel(tripsChannel);
+        clearInterval(interval);
+      };
     } else {
       // Fallback when Supabase is NOT configured
       const loadLocalDriverTrips = () => {
@@ -401,7 +490,9 @@ export default function DriverFlow({
         }
       };
       loadLocalDriverTrips();
-      const interval = setInterval(loadLocalDriverTrips, 1000);
+      
+      // Check localStorage occasionally (every 10 seconds) instead of hammering it every 1 second
+      const interval = setInterval(loadLocalDriverTrips, 10000);
       return () => clearInterval(interval);
     }
   }, [driverPhone, currentDriverPhone, currentDriverName]);
@@ -435,7 +526,8 @@ export default function DriverFlow({
       };
       fetchOnlineStatus();
 
-      const interval = setInterval(fetchOnlineStatus, 2000);
+      // Poll online status at a light 15-second interval instead of every 2 seconds
+      const interval = setInterval(fetchOnlineStatus, 15000);
       return () => clearInterval(interval);
     }
   }, [driverPhone]);
@@ -535,7 +627,6 @@ export default function DriverFlow({
     .sort((a, b) => getTripSortScore(a) - getTripSortScore(b));
   const completedTrips = driverTrips.filter(t => t.status === 'completed');
   const [portalTab, setPortalTab] = useState<'alerts' | 'upcoming' | 'completed'>('alerts');
-  const [transactions, setTransactions] = useState<DriverTransaction[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Create Trip States
@@ -2065,7 +2156,7 @@ export default function DriverFlow({
                 <div className="space-y-0.5">
                   <p className="font-mono text-[9px] text-white/70 uppercase">Solde Compte</p>
                   <p className="font-mono text-xs font-bold text-green-300">
-                    <span className="text-base font-extrabold">17 950</span> FCFA
+                    <span className="text-base font-extrabold">{walletBalance.toLocaleString()}</span> FCFA
                   </p>
                 </div>
                 <div className="flex items-center gap-2" title="Changer de statut">
@@ -2574,7 +2665,7 @@ export default function DriverFlow({
                   <span className="font-sans text-gray-400 font-semibold">Total encaissé en espèces</span>
                   <span className="material-symbols-outlined text-[#3d5ba9] text-base">payments</span>
                 </div>
-                <p className="font-mono text-2xl font-bold text-gray-800">17 950 FCFA</p>
+                <p className="font-mono text-2xl font-bold text-gray-800">{walletBalance.toLocaleString()} FCFA</p>
                 <div className="pt-3 border-t border-gray-100 flex justify-between text-[10px] text-gray-400 font-mono">
                   <span>Dernière mise à jour</span>
                   <span>Il y a 5 min</span>
