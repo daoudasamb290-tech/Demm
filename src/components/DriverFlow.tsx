@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Html5Qrcode } from 'html5-qrcode';
 import { DriverTrip, DriverTransaction, PassengerBooking } from '../types';
 import { INITIAL_DRIVER_TRIPS, INITIAL_TRANSACTIONS, LOCATIONS } from '../data';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
@@ -16,6 +17,28 @@ const getTodayISODate = (): string => {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+};
+
+const getLocalAccounts = (): Record<string, any> => {
+  try {
+    const raw = localStorage.getItem('dem_local_driver_accounts');
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
+const saveLocalAccount = (phone: string, accountData: any) => {
+  try {
+    const accounts = getLocalAccounts();
+    accounts[phone] = {
+      ...(accounts[phone] || {}),
+      ...accountData
+    };
+    localStorage.setItem('dem_local_driver_accounts', JSON.stringify(accounts));
+  } catch (err) {
+    console.warn('Failed to save local account:', err);
+  }
 };
 
 const playNotificationSound = () => {
@@ -202,6 +225,80 @@ export default function DriverFlow({
     return (cleanDriverPhone && cleanBookingPhone && (cleanBookingPhone.endsWith(cleanDriverPhone) || cleanDriverPhone.endsWith(cleanBookingPhone))) ||
            (currentDriverName && b.driverName && b.driverName.toLowerCase().trim() === currentDriverName.toLowerCase().trim());
   });
+
+  // Real QR Code Scanner implementation using html5-qrcode
+  useEffect(() => {
+    let html5QrCode: Html5Qrcode | null = null;
+    let isMounted = true;
+
+    if (isScannerOpen && !selectedScannerBooking) {
+      // Delay slightly to ensure the DOM element #driver-qr-scanner is fully rendered
+      const timer = setTimeout(() => {
+        if (!isMounted) return;
+        try {
+          const container = document.getElementById("driver-qr-scanner");
+          if (!container) {
+            console.warn("[Scanner] Element #driver-qr-scanner not found in DOM yet");
+            return;
+          }
+
+          html5QrCode = new Html5Qrcode("driver-qr-scanner");
+          html5QrCode.start(
+            { facingMode: "environment" },
+            {
+              fps: 10,
+              qrbox: (width, height) => {
+                const min = Math.min(width, height);
+                const size = Math.floor(min * 0.7);
+                return { width: size, height: size };
+              },
+            },
+            (decodedText, decodedResult) => {
+              console.log("[Scanner] Code detected:", decodedText);
+              const code = decodedText.trim().toLowerCase();
+              // Find matching booking in ALL bookings to ensure we detect the ticket properly
+              const found = bookings.find(b => {
+                const bRef = b.reference ? String(b.reference).trim().toLowerCase() : '';
+                const bId = b.id ? String(b.id).trim().toLowerCase() : '';
+                const bPhone = b.phone ? String(b.phone).trim().toLowerCase() : '';
+                const bName = b.passengerName ? String(b.passengerName).trim().toLowerCase() : '';
+                return bRef === code || bId === code || bPhone.includes(code) || bName.includes(code);
+              });
+
+              if (found) {
+                setSelectedScannerBooking(found);
+                showToast("Code QR scanné avec succès !", "success");
+                
+                // Stop scanning immediately
+                if (html5QrCode && html5QrCode.isScanning) {
+                  html5QrCode.stop().catch(err => console.error("Error stopping scanner:", err));
+                }
+              } else {
+                showToast(`Code inconnu : ${decodedText}`, "error");
+              }
+            },
+            () => {
+              // Ignore scan failures (e.g. frames with no QR codes) to avoid console spam
+            }
+          ).catch((err) => {
+            console.warn("[Scanner] Failed to start scanner:", err);
+          });
+        } catch (e) {
+          console.error("[Scanner] Error during initialization:", e);
+        }
+      }, 300);
+
+      return () => {
+        isMounted = false;
+        clearTimeout(timer);
+        if (html5QrCode) {
+          if (html5QrCode.isScanning) {
+            html5QrCode.stop().catch(err => console.warn("[Scanner] Stop failed:", err));
+          }
+        }
+      };
+    }
+  }, [isScannerOpen, selectedScannerBooking, bookings]);
 
   useEffect(() => {
     if (isSupabaseConfigured) {
@@ -508,6 +605,22 @@ export default function DriverFlow({
     localStorage.setItem('dem_driver_vehicle_seats', editVehicleSeats);
     localStorage.setItem('dem_driver_avatar', editAvatar);
     localStorage.setItem('dem_driver_vehicle_image', editVehicleImage);
+
+    // Save to global local accounts registry to persist across logouts
+    saveLocalAccount(editPhone, {
+      id: localStorage.getItem('dem_driver_id') || 'driver_' + Date.now(),
+      name: editName,
+      phone: editPhone,
+      email: editEmail,
+      license: editLicense,
+      experience: editExperience,
+      vehicle_brand: editVehicleBrand,
+      vehicle_plate: editVehiclePlate,
+      vehicle_seats: editVehicleSeats,
+      avatar: editAvatar,
+      vehicle_image: editVehicleImage,
+      password: localStorage.getItem('dem_driver_password') || ''
+    });
 
     // Sync profile to Supabase
     if (isSupabaseConfigured) {
@@ -896,16 +1009,46 @@ export default function DriverFlow({
         localStorage.setItem('dem_driver_vehicle_seats', vehicleSeats);
         localStorage.setItem('dem_driver_avatar', driverAvatar);
         localStorage.setItem('dem_driver_password', secureHashedPassword);
+
+        saveLocalAccount(cleanPhone, {
+          id,
+          name: cleanName,
+          phone: cleanPhone,
+          email: cleanEmail,
+          license: licenseType,
+          experience: experienceYears,
+          vehicle_brand: cleanBrand,
+          vehicle_plate: cleanPlate,
+          vehicle_seats: vehicleSeats,
+          avatar: driverAvatar,
+          password: secureHashedPassword
+        });
       } catch (err: any) {
         console.warn('Failed to register driver in Supabase (falling back to local):', err);
+        const fallbackId = 'driver_' + Date.now();
+        localStorage.setItem('dem_driver_id', fallbackId);
         localStorage.setItem('dem_driver_name', cleanName);
         localStorage.setItem('dem_driver_phone', cleanPhone);
         localStorage.setItem('dem_driver_password', secureHashedPassword);
+        saveLocalAccount(cleanPhone, {
+          id: fallbackId,
+          name: cleanName,
+          phone: cleanPhone,
+          password: secureHashedPassword
+        });
       }
     } else {
+      const fallbackId = 'driver_' + Date.now();
+      localStorage.setItem('dem_driver_id', fallbackId);
       localStorage.setItem('dem_driver_name', cleanName);
       localStorage.setItem('dem_driver_phone', cleanPhone);
       localStorage.setItem('dem_driver_password', secureHashedPassword);
+      saveLocalAccount(cleanPhone, {
+        id: fallbackId,
+        name: cleanName,
+        phone: cleanPhone,
+        password: secureHashedPassword
+      });
     }
 
     setDriverLoginError('');
@@ -946,18 +1089,43 @@ export default function DriverFlow({
 
         if (error) {
           console.warn('Supabase driver login error (falling back to local):', error.message);
-          // Local fallback
-          const localPhone = localStorage.getItem('dem_driver_phone');
-          const localPassword = localStorage.getItem('dem_driver_password');
-          const localName = localStorage.getItem('dem_driver_name') || 'Chauffeur';
+          // Local fallback from registry
+          const accounts = getLocalAccounts();
+          const localAccount = accounts[cleanLoginPhone];
+          const isMatch = (localAccount && localAccount.password) ? await verifyPassword(loginDriverPassword, localAccount.password) : false;
           
-          const isMatch = localPassword ? await verifyPassword(loginDriverPassword, localPassword) : false;
-          if (localPhone === cleanLoginPhone && isMatch) {
-            setDriverName(localName);
+          if (localAccount && isMatch) {
+            setDriverName(localAccount.name || 'Chauffeur');
             setDriverPhone(cleanLoginPhone);
+            if (localAccount.avatar) setDriverAvatar(localAccount.avatar);
+            if (localAccount.email) setDriverEmail(localAccount.email);
+            if (localAccount.license) setDriverLicense(localAccount.license);
+            if (localAccount.experience) setExperience(localAccount.experience);
+            if (localAccount.vehicle_brand) setVehicleBrand(localAccount.vehicle_brand);
+            if (localAccount.vehicle_plate) setVehiclePlate(localAccount.vehicle_plate);
+            if (localAccount.vehicle_seats) setVehicleSeats(localAccount.vehicle_seats);
+            if (localAccount.vehicle_image) setVehicleImage(localAccount.vehicle_image);
+
+            localStorage.setItem('dem_driver_id', localAccount.id || 'driver_' + Date.now());
+            localStorage.setItem('dem_driver_name', localAccount.name || 'Chauffeur');
+            localStorage.setItem('dem_driver_phone', cleanLoginPhone);
+            if (localAccount.avatar) localStorage.setItem('dem_driver_avatar', localAccount.avatar);
+            if (localAccount.email) localStorage.setItem('dem_driver_email', localAccount.email);
+            if (localAccount.license) localStorage.setItem('dem_driver_license', localAccount.license);
+            if (localAccount.experience) localStorage.setItem('dem_driver_experience', localAccount.experience);
+            if (localAccount.vehicle_brand) localStorage.setItem('dem_driver_vehicle_brand', localAccount.vehicle_brand);
+            if (localAccount.vehicle_plate) localStorage.setItem('dem_driver_vehicle_plate', localAccount.vehicle_plate);
+            if (localAccount.vehicle_seats) localStorage.setItem('dem_driver_vehicle_seats', localAccount.vehicle_seats);
+            if (localAccount.password) localStorage.setItem('dem_driver_password', localAccount.password);
+            if (localAccount.vehicle_image) localStorage.setItem('dem_driver_vehicle_image', localAccount.vehicle_image);
+
             setScreen('portal');
             return;
           } else {
+            if (localAccount) {
+              setDriverLoginError('Mot de passe incorrect');
+              return;
+            }
             // Local fallback auto-creation with hash
             const id = 'driver_' + Date.now();
             const defaultName = "Chauffeur " + cleanLoginPhone.slice(-4);
@@ -968,6 +1136,14 @@ export default function DriverFlow({
             localStorage.setItem('dem_driver_name', defaultName);
             localStorage.setItem('dem_driver_phone', cleanLoginPhone);
             localStorage.setItem('dem_driver_password', secureHashedPassword);
+            
+            saveLocalAccount(cleanLoginPhone, {
+              id,
+              name: defaultName,
+              phone: cleanLoginPhone,
+              password: secureHashedPassword
+            });
+
             alert("Aucun compte chauffeur local existant. Un nouveau compte sécurisé a été automatiquement créé !");
             setScreen('portal');
             return;
@@ -1000,6 +1176,18 @@ export default function DriverFlow({
           if (matchedDriver.vehicle_plate) localStorage.setItem('dem_driver_vehicle_plate', matchedDriver.vehicle_plate);
           if (matchedDriver.seats_available) localStorage.setItem('dem_driver_vehicle_seats', String(matchedDriver.seats_available));
           if (matchedDriver.password) localStorage.setItem('dem_driver_password', matchedDriver.password);
+
+          // Sync Supabase account to local accounts registry
+          saveLocalAccount(matchedDriver.phone, {
+            id: matchedDriver.id,
+            name: matchedDriver.name,
+            phone: matchedDriver.phone,
+            avatar: matchedDriver.avatar || '',
+            vehicle_brand: matchedDriver.vehicle_name || '',
+            vehicle_plate: matchedDriver.vehicle_plate || '',
+            vehicle_seats: String(matchedDriver.seats_available || '15'),
+            password: matchedDriver.password || ''
+          });
         } else {
           // AUTO REGISTER DRIVER ON SUPABASE!
           const id = 'driver_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
@@ -1047,21 +1235,59 @@ export default function DriverFlow({
           localStorage.setItem('dem_driver_vehicle_plate', driverData.vehicle_plate);
           localStorage.setItem('dem_driver_vehicle_seats', String(driverData.seats_available));
           localStorage.setItem('dem_driver_password', driverData.password);
+
+          // Sync Supabase auto-registered account to local accounts registry
+          saveLocalAccount(driverData.phone, {
+            id,
+            name: driverData.name,
+            phone: driverData.phone,
+            avatar: driverData.avatar,
+            vehicle_brand: driverData.vehicle_name,
+            vehicle_plate: driverData.vehicle_plate,
+            vehicle_seats: String(driverData.seats_available),
+            password: driverData.password
+          });
           alert("Votre compte chauffeur a été créé automatiquement avec succès sur Supabase ! Bienvenue.");
         }
       } catch (err: any) {
         console.warn('Unexpected error in login (falling back to local):', err.message);
-        const localPhone = localStorage.getItem('dem_driver_phone');
-        const localPassword = localStorage.getItem('dem_driver_password');
-        const localName = localStorage.getItem('dem_driver_name') || 'Chauffeur';
+        // Local fallback from registry
+        const accounts = getLocalAccounts();
+        const localAccount = accounts[cleanLoginPhone];
+        const isMatch = (localAccount && localAccount.password) ? await verifyPassword(loginDriverPassword, localAccount.password) : false;
         
-        const isMatch = localPassword ? await verifyPassword(loginDriverPassword, localPassword) : false;
-        if (localPhone === cleanLoginPhone && isMatch) {
-          setDriverName(localName);
+        if (localAccount && isMatch) {
+          setDriverName(localAccount.name || 'Chauffeur');
           setDriverPhone(cleanLoginPhone);
+          if (localAccount.avatar) setDriverAvatar(localAccount.avatar);
+          if (localAccount.email) setDriverEmail(localAccount.email);
+          if (localAccount.license) setDriverLicense(localAccount.license);
+          if (localAccount.experience) setExperience(localAccount.experience);
+          if (localAccount.vehicle_brand) setVehicleBrand(localAccount.vehicle_brand);
+          if (localAccount.vehicle_plate) setVehiclePlate(localAccount.vehicle_plate);
+          if (localAccount.vehicle_seats) setVehicleSeats(localAccount.vehicle_seats);
+          if (localAccount.vehicle_image) setVehicleImage(localAccount.vehicle_image);
+
+          localStorage.setItem('dem_driver_id', localAccount.id || 'driver_' + Date.now());
+          localStorage.setItem('dem_driver_name', localAccount.name || 'Chauffeur');
+          localStorage.setItem('dem_driver_phone', cleanLoginPhone);
+          if (localAccount.avatar) localStorage.setItem('dem_driver_avatar', localAccount.avatar);
+          if (localAccount.email) localStorage.setItem('dem_driver_email', localAccount.email);
+          if (localAccount.license) localStorage.setItem('dem_driver_license', localAccount.license);
+          if (localAccount.experience) localStorage.setItem('dem_driver_experience', localAccount.experience);
+          if (localAccount.vehicle_brand) localStorage.setItem('dem_driver_vehicle_brand', localAccount.vehicle_brand);
+          if (localAccount.vehicle_plate) localStorage.setItem('dem_driver_vehicle_plate', localAccount.vehicle_plate);
+          if (localAccount.vehicle_seats) localStorage.setItem('dem_driver_vehicle_seats', localAccount.vehicle_seats);
+          if (localAccount.password) localStorage.setItem('dem_driver_password', localAccount.password);
+          if (localAccount.vehicle_image) localStorage.setItem('dem_driver_vehicle_image', localAccount.vehicle_image);
+
           setScreen('portal');
           return;
         } else {
+          if (localAccount) {
+            setDriverLoginError('Mot de passe incorrect');
+            return;
+          }
           // Local fallback auto-creation
           const id = 'driver_' + Date.now();
           const defaultName = "Chauffeur " + cleanLoginPhone.slice(-4);
@@ -1072,22 +1298,54 @@ export default function DriverFlow({
           localStorage.setItem('dem_driver_name', defaultName);
           localStorage.setItem('dem_driver_phone', cleanLoginPhone);
           localStorage.setItem('dem_driver_password', secureHashedPassword);
+          
+          saveLocalAccount(cleanLoginPhone, {
+            id,
+            name: defaultName,
+            phone: cleanLoginPhone,
+            password: secureHashedPassword
+          });
+
           alert("Nouveau compte chauffeur créé automatiquement en mode local !");
           setScreen('portal');
           return;
         }
       }
     } else {
-      const localPhone = localStorage.getItem('dem_driver_phone');
-      const localPassword = localStorage.getItem('dem_driver_password');
-      const localName = localStorage.getItem('dem_driver_name') || 'Chauffeur';
+      // Local fallback from registry
+      const accounts = getLocalAccounts();
+      const localAccount = accounts[cleanLoginPhone];
+      const isMatch = (localAccount && localAccount.password) ? await verifyPassword(loginDriverPassword, localAccount.password) : false;
       
-      const isMatch = localPassword ? await verifyPassword(loginDriverPassword, localPassword) : false;
-      if (localPhone === cleanLoginPhone && isMatch) {
-        setDriverName(localName);
+      if (localAccount && isMatch) {
+        setDriverName(localAccount.name || 'Chauffeur');
         setDriverPhone(cleanLoginPhone);
-        localStorage.setItem('dem_driver_id', localStorage.getItem('dem_driver_id') || 'driver_' + Date.now());
+        if (localAccount.avatar) setDriverAvatar(localAccount.avatar);
+        if (localAccount.email) setDriverEmail(localAccount.email);
+        if (localAccount.license) setDriverLicense(localAccount.license);
+        if (localAccount.experience) setExperience(localAccount.experience);
+        if (localAccount.vehicle_brand) setVehicleBrand(localAccount.vehicle_brand);
+        if (localAccount.vehicle_plate) setVehiclePlate(localAccount.vehicle_plate);
+        if (localAccount.vehicle_seats) setVehicleSeats(localAccount.vehicle_seats);
+        if (localAccount.vehicle_image) setVehicleImage(localAccount.vehicle_image);
+
+        localStorage.setItem('dem_driver_id', localAccount.id || 'driver_' + Date.now());
+        localStorage.setItem('dem_driver_name', localAccount.name || 'Chauffeur');
+        localStorage.setItem('dem_driver_phone', cleanLoginPhone);
+        if (localAccount.avatar) localStorage.setItem('dem_driver_avatar', localAccount.avatar);
+        if (localAccount.email) localStorage.setItem('dem_driver_email', localAccount.email);
+        if (localAccount.license) localStorage.setItem('dem_driver_license', localAccount.license);
+        if (localAccount.experience) localStorage.setItem('dem_driver_experience', localAccount.experience);
+        if (localAccount.vehicle_brand) localStorage.setItem('dem_driver_vehicle_brand', localAccount.vehicle_brand);
+        if (localAccount.vehicle_plate) localStorage.setItem('dem_driver_vehicle_plate', localAccount.vehicle_plate);
+        if (localAccount.vehicle_seats) localStorage.setItem('dem_driver_vehicle_seats', localAccount.vehicle_seats);
+        if (localAccount.password) localStorage.setItem('dem_driver_password', localAccount.password);
+        if (localAccount.vehicle_image) localStorage.setItem('dem_driver_vehicle_image', localAccount.vehicle_image);
       } else {
+        if (localAccount) {
+          setDriverLoginError('Mot de passe incorrect');
+          return;
+        }
         const id = 'driver_' + Date.now();
         const defaultName = "Chauffeur " + cleanLoginPhone.slice(-4);
         const secureHashedPassword = await hashPassword(loginDriverPassword);
@@ -1097,6 +1355,14 @@ export default function DriverFlow({
         localStorage.setItem('dem_driver_name', defaultName);
         localStorage.setItem('dem_driver_phone', cleanLoginPhone);
         localStorage.setItem('dem_driver_password', secureHashedPassword);
+        
+        saveLocalAccount(cleanLoginPhone, {
+          id,
+          name: defaultName,
+          phone: cleanLoginPhone,
+          password: secureHashedPassword
+        });
+
         alert("Votre compte chauffeur local a été créé automatiquement avec succès !");
       }
     }
@@ -3380,10 +3646,12 @@ export default function DriverFlow({
               <div className="p-5 flex-1 overflow-y-auto space-y-4">
                 {!selectedScannerBooking ? (
                   <>
-                    {/* Simulated Camera Scanner box */}
-                    <div className="relative aspect-video w-full rounded-2xl bg-[#0a0f1d] overflow-hidden border border-gray-800 flex flex-col items-center justify-center">
+                    {/* Real Camera Scanner box */}
+                    <div className="relative aspect-video w-full rounded-2xl bg-black overflow-hidden border border-gray-100 flex flex-col items-center justify-center">
+                      <div id="driver-qr-scanner" className="w-full h-full" />
+                      
                       {/* Grid / target overlay */}
-                      <div className="absolute w-32 h-20 border-2 border-dashed border-green-500 rounded-lg flex items-center justify-center">
+                      <div className="absolute pointer-events-none w-32 h-20 border-2 border-dashed border-green-500 rounded-lg flex items-center justify-center z-10">
                         <div className="w-2 h-2 bg-green-500 rounded-full animate-ping" />
                       </div>
                       
@@ -3396,12 +3664,12 @@ export default function DriverFlow({
                           duration: 1.5,
                           ease: "easeInOut"
                         }}
-                        className="absolute left-1/2 -translate-x-1/2 w-40 h-0.5 bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]"
+                        className="absolute pointer-events-none left-1/2 -translate-x-1/2 w-40 h-0.5 bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)] z-10"
                       />
 
                       {/* Info overlay */}
-                      <span className="absolute bottom-2 font-mono text-[9px] text-green-400 tracking-widest uppercase animate-pulse">
-                        Caméra Prête • Scannez le QR
+                      <span className="absolute bottom-2 font-mono text-[9px] text-green-400 bg-black/40 px-2 py-0.5 rounded tracking-widest uppercase animate-pulse z-10">
+                        Caméra Active • Scannez le QR
                       </span>
                     </div>
 
@@ -3413,39 +3681,45 @@ export default function DriverFlow({
 
                       {/* Quick Select of driver's active/pending/accepted bookings to simulate scanning */}
                       <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                        {myBookings.filter(b => b.status === 'pending' || b.status === 'accepted').length === 0 ? (
-                          <div className="text-center py-4 bg-gray-50 rounded-xl text-[11px] text-gray-500">
-                            Aucune réservation en attente de validation
-                          </div>
-                        ) : (
-                          myBookings
-                            .filter(b => b.status === 'pending' || b.status === 'accepted')
-                            .map((b, idx) => (
-                              <button
-                                key={`${b.id}-${idx}`}
-                                onClick={() => setSelectedScannerBooking(b)}
-                                className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-150 p-2.5 rounded-xl text-left flex items-center justify-between transition-colors active:scale-98 cursor-pointer group"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-space font-bold text-xs text-[#10204A] truncate">{b.passengerName}</span>
-                                    <span className="bg-[#3d5ba9]/10 text-[#3d5ba9] px-1.5 py-0.5 rounded font-mono text-[8px] font-bold uppercase">
-                                      {b.reference || 'DEM'}
-                                    </span>
-                                  </div>
-                                  <p className="text-[10px] text-gray-500 truncate mt-0.5">
-                                    {b.from} ➜ {b.to}
-                                  </p>
-                                </div>
-                                <div className="text-right ml-2 flex items-center gap-1.5">
-                                  <span className="bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded font-mono text-[9px] font-bold">
-                                    {b.seatsCount || 1} Pl.
+                        {(() => {
+                          const driverActive = myBookings.filter(b => b.status === 'pending' || b.status === 'accepted');
+                          const allActive = bookings.filter(b => b.status === 'pending' || b.status === 'accepted');
+                          const listToShow = driverActive.length > 0 ? driverActive : allActive;
+
+                          if (listToShow.length === 0) {
+                            return (
+                              <div className="text-center py-4 bg-gray-50 rounded-xl text-[11px] text-gray-500">
+                                Aucune réservation active trouvée dans le système
+                              </div>
+                            );
+                          }
+
+                          return listToShow.map((b, idx) => (
+                            <button
+                              key={`${b.id}-${idx}`}
+                              onClick={() => setSelectedScannerBooking(b)}
+                              className="w-full bg-gray-50 hover:bg-gray-100 border border-gray-150 p-2.5 rounded-xl text-left flex items-center justify-between transition-colors active:scale-98 cursor-pointer group"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-space font-bold text-xs text-[#10204A] truncate">{b.passengerName}</span>
+                                  <span className="bg-[#3d5ba9]/10 text-[#3d5ba9] px-1.5 py-0.5 rounded font-mono text-[8px] font-bold uppercase">
+                                    {b.reference || 'DEM'}
                                   </span>
-                                  <span className="material-symbols-outlined text-gray-400 group-hover:text-[#3d5ba9] text-xs transition-colors">qr_code</span>
                                 </div>
-                              </button>
-                            ))
-                        )}
+                                <p className="text-[10px] text-gray-500 truncate mt-0.5">
+                                  {b.from} ➜ {b.to}
+                                </p>
+                              </div>
+                              <div className="text-right ml-2 flex items-center gap-1.5">
+                                <span className="bg-orange-50 text-orange-600 px-1.5 py-0.5 rounded font-mono text-[9px] font-bold">
+                                  {b.seatsCount || 1} Pl.
+                                </span>
+                                <span className="material-symbols-outlined text-gray-400 group-hover:text-[#3d5ba9] text-xs transition-colors">qr_code</span>
+                              </div>
+                            </button>
+                          ));
+                        })()}
                       </div>
 
                       {/* Manual reference input */}
@@ -3466,15 +3740,16 @@ export default function DriverFlow({
                             onClick={() => {
                               if (!manualCode.trim()) return;
                               const code = manualCode.trim().toLowerCase();
-                              const found = myBookings.find(b => 
-                                (b.reference && b.reference.toLowerCase().includes(code)) || 
-                                (b.phone && b.phone.includes(code)) || 
-                                (b.passengerName && b.passengerName.toLowerCase().includes(code))
-                              );
+                              const found = bookings.find(b => {
+                                const bRef = b.reference ? String(b.reference).trim().toLowerCase() : '';
+                                const bPhone = b.phone ? String(b.phone).trim().toLowerCase() : '';
+                                const bName = b.passengerName ? String(b.passengerName).trim().toLowerCase() : '';
+                                return bRef.includes(code) || bPhone.includes(code) || bName.includes(code);
+                              });
                               if (found) {
                                 setSelectedScannerBooking(found);
                               } else {
-                                showToast("Aucun ticket correspondant trouvé", "error");
+                                showToast("Aucun ticket correspondant trouvé dans le système", "error");
                               }
                             }}
                             className="bg-[#3d5ba9] hover:bg-[#3d5ba9]/90 text-white text-xs font-bold font-space px-4 py-2.5 rounded-xl active:scale-95 transition-transform shadow-sm cursor-pointer"

@@ -6,24 +6,10 @@
 import { PassengerBooking, DriverTrip, DriverTransaction } from './types';
 
 export const LOCATIONS = [
-  'Aéroport AIBD',
   'Dakar',
-  'Diourbel',
-  'Fatick',
-  'Kaffrine',
-  'Kaolack',
-  'Kédougou',
-  'Kolda',
-  'Louga',
-  'Matam',
-  'Mboro',
-  'Saint-Louis',
-  'Sédhiou',
-  'Tambacounda',
   'Thiès',
   'Tivaouane',
-  'Touba',
-  'Ziguinchor'
+  'Touba'
 ];
 
 export interface SearchDriver {

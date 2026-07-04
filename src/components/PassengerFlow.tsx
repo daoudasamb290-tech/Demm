@@ -3265,6 +3265,21 @@ export default function PassengerFlow({
                     </p>
                     <p className="text-base font-bold font-space text-brand-blue mb-3">{viewedBooking.reference}</p>
                     
+                    {/* Real Scannable QR Code */}
+                    <div className="flex flex-col items-center mb-5">
+                      <div className="bg-white p-3 rounded-2xl border border-gray-150 shadow-sm">
+                        <img 
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(viewedBooking.reference || viewedBooking.id)}`}
+                          alt="QR Code"
+                          className="w-28 h-28"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      <span className="text-[9px] text-gray-500 font-medium font-sans mt-2">
+                        Présentez ce QR Code au chauffeur à l'embarquement
+                      </span>
+                    </div>
+
                     {/* Barcode representation */}
                     <div className="flex flex-col items-center">
                       <div className="flex items-end gap-0.5 h-10 mb-1.5 bg-white p-1 px-2 rounded border border-gray-100">

@@ -12,6 +12,84 @@ import { INITIAL_BOOKINGS } from './data';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 
 export default function App() {
+  // Security hooks: prevent inspecting, right-clicks, and standard shortcuts
+  useEffect(() => {
+    // Disable right click context menu
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    // Disable standard developer/inspection shortcut keys
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. F12 key
+      if (e.key === 'F12' || e.keyCode === 123) {
+        e.preventDefault();
+        return false;
+      }
+      
+      // 2. Ctrl+Shift+I or Cmd+Opt+I (Inspect)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.keyCode === 73)) {
+        e.preventDefault();
+        return false;
+      }
+
+      // 3. Ctrl+Shift+J or Cmd+Opt+J (Console)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'J' || e.key === 'j' || e.keyCode === 74)) {
+        e.preventDefault();
+        return false;
+      }
+
+      // 4. Ctrl+Shift+C or Cmd+Opt+C (Select element)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'C' || e.key === 'c' || e.keyCode === 67)) {
+        e.preventDefault();
+        return false;
+      }
+
+      // 5. Ctrl+U or Cmd+Opt+U (View Source)
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'U' || e.key === 'u' || e.keyCode === 85)) {
+        e.preventDefault();
+        return false;
+      }
+
+      // 6. Ctrl+S or Cmd+S (Save page)
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'S' || e.key === 's' || e.keyCode === 83)) {
+        e.preventDefault();
+        return false;
+      }
+    };
+
+    document.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Dynamic devtools detection & deterrence (clearing console & active warnings)
+    const threshold = 160;
+    const detectDevTools = () => {
+      const widthThreshold = window.outerWidth - window.innerWidth > threshold;
+      const heightThreshold = window.outerHeight - window.innerHeight > threshold;
+      if (widthThreshold || heightThreshold) {
+        console.clear();
+        console.log("%cAccès Sécurisé - DEM niou_dem", "color: #3d5ba9; font-size: 20px; font-weight: bold;");
+        console.log("L'inspection de cette application de transport est sécurisée et désactivée.");
+      }
+    };
+
+    window.addEventListener('resize', detectDevTools);
+    
+    // Periodically clear console as extra safety measure
+    const consoleInterval = setInterval(() => {
+      try {
+        console.clear();
+      } catch (e) {}
+    }, 2000);
+
+    return () => {
+      document.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', detectDevTools);
+      clearInterval(consoleInterval);
+    };
+  }, []);
+
   // Primary app role state
   const [role, setRole] = useState<AppState['role']>('welcome');
   
@@ -102,6 +180,21 @@ export default function App() {
         }]);
         if (error) {
           console.error("Booking insert error from Supabase:", error.message);
+        } else {
+          // Insertion réussie ! On appelle l'API de notification (Gemini + Twilio WhatsApp)
+          try {
+            const notifyRes = await fetch('/api/send-booking-notification', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(newBooking),
+            });
+            const notifyData = await notifyRes.json();
+            console.log('[Notification API]', notifyData);
+          } catch (notifyErr: any) {
+            console.warn('[Notification API] Erreur lors de l’appel :', notifyErr?.message || notifyErr);
+          }
         }
       } catch (err: any) {
         console.warn("Booking insert warning:", err?.message || err);
