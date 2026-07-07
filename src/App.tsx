@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import WelcomeScreen from './components/WelcomeScreen';
 import PassengerFlow from './components/PassengerFlow';
 import DriverFlow from './components/DriverFlow';
@@ -161,8 +161,12 @@ export default function App() {
         )
         .subscribe();
 
-      // Gentle fallback polling every 12 seconds instead of every 1 second
-      const interval = setInterval(fetchBookings, 12000);
+      // Gentle fallback polling every 60 seconds instead of 12 seconds, only when tab is active
+      const interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchBookings();
+        }
+      }, 60000);
       return () => {
         supabase.removeChannel(channel);
         clearInterval(interval);
@@ -270,6 +274,22 @@ export default function App() {
     setRole('welcome');
   };
 
+  const sortedBookings = useMemo(() => {
+    return [...bookings].sort((a, b) => {
+      const getVal = (idStr: string) => {
+        if (!idStr) return 0;
+        const m1 = idStr.match(/b-(\d+)/);
+        if (m1) return parseInt(m1[1], 10);
+        const m2 = idStr.match(/b(\d+)/);
+        if (m2) return parseInt(m2[1], 10);
+        const digits = idStr.replace(/\D/g, '');
+        if (digits) return parseInt(digits, 10);
+        return 0;
+      };
+      return getVal(b.id) - getVal(a.id);
+    });
+  }, [bookings]);
+
   return (
     <div className="relative min-h-screen bg-slate-900 flex items-center justify-center font-sans">
       
@@ -281,7 +301,7 @@ export default function App() {
 
         {role === 'passenger' && (
           <PassengerFlow
-            bookings={bookings}
+            bookings={sortedBookings}
             addBooking={handleAddBooking}
             deleteBooking={handleDeleteBooking}
             onUpdateBookingStatus={handleUpdateBookingStatus}
@@ -296,7 +316,7 @@ export default function App() {
             currentScreen={driverScreen}
             setScreen={setDriverScreen}
             onBackToWelcome={handleBackToWelcome}
-            bookings={bookings}
+            bookings={sortedBookings}
             onUpdateBookingStatus={handleUpdateBookingStatus}
           />
         )}

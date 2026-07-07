@@ -440,8 +440,12 @@ export default function DriverFlow({
         )
         .subscribe();
 
-      // Gentle fallback polling every 12 seconds instead of every 1 second
-      const interval = setInterval(fetchDriverTrips, 12000);
+      // Gentle fallback polling every 60 seconds instead of 12 seconds, only when tab is active
+      const interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchDriverTrips();
+        }
+      }, 60000);
       return () => {
         supabase.removeChannel(tripsChannel);
         clearInterval(interval);
@@ -525,10 +529,6 @@ export default function DriverFlow({
         }
       };
       fetchOnlineStatus();
-
-      // Poll online status at a light 15-second interval instead of every 2 seconds
-      const interval = setInterval(fetchOnlineStatus, 15000);
-      return () => clearInterval(interval);
     }
   }, [driverPhone]);
 
@@ -912,6 +912,8 @@ export default function DriverFlow({
         boardingPlace: newTrip.boardingPlace
       };
       localStorage.setItem('dem_available_drivers', JSON.stringify([newSearchDriver, ...currentDrivers]));
+      // Trigger instant update in passenger flow if running in same session/tab
+      window.dispatchEvent(new Event('dem-drivers-updated'));
     } catch (err) {
       console.warn("Error syncing to dem_available_drivers:", err);
     }

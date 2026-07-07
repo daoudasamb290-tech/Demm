@@ -363,8 +363,12 @@ export default function PassengerFlow({
         )
         .subscribe();
 
-      // Gentle fallback polling every 12 seconds instead of 1 second
-      const interval = setInterval(fetchDrivers, 12000);
+      // Gentle fallback polling every 60 seconds instead of 12 seconds, only when tab is active
+      const interval = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          fetchDrivers();
+        }
+      }, 60000);
       return () => {
         supabase.removeChannel(driversChannel);
         clearInterval(interval);
@@ -389,7 +393,14 @@ export default function PassengerFlow({
       
       // Check localStorage occasionally (every 10 seconds) instead of hammering it every 1 second
       const interval = setInterval(loadLocalDrivers, 10000);
-      return () => clearInterval(interval);
+      
+      // Listen to immediate events from local driver publishes
+      window.addEventListener('dem-drivers-updated', loadLocalDrivers);
+      
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener('dem-drivers-updated', loadLocalDrivers);
+      };
     }
   }, []);
 
